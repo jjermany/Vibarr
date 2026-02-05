@@ -227,17 +227,17 @@ npm run lint
 
 ## Roadmap
 
-### Phase 1: Foundation (Current)
+### Phase 1: Foundation
 - [x] Plex API integration
 - [x] Basic metadata fetching
 - [x] Simple artist/album search UI
 - [x] Manual download trigger via Prowlarr
 
-### Phase 2: Intelligence
-- [ ] Listening history analysis
-- [ ] Basic recommendation algorithm
-- [ ] New release monitoring
-- [ ] Wishlist management
+### Phase 2: Intelligence (Current)
+- [x] Listening history analysis
+- [x] Basic recommendation algorithm
+- [x] New release monitoring
+- [x] Wishlist management
 
 ### Phase 3: Automation
 - [ ] Auto-download pipeline
