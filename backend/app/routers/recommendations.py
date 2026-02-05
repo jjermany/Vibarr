@@ -1,13 +1,21 @@
 """Recommendation endpoints."""
 
+import logging
 from typing import Optional, List
-from fastapi import APIRouter, Depends, Query
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.recommendation import Recommendation
+from app.models.artist import Artist
+from app.models.album import Album
+from app.models.wishlist import WishlistItem
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -34,7 +42,7 @@ class RecommendationResponse(BaseModel):
         from_attributes = True
 
 
-@router.get("", response_model=List[RecommendationResponse])
+@router.get("")
 async def get_recommendations(
     category: Optional[str] = Query(None, description="Filter by category"),
     type: Optional[str] = Query(None, description="Filter by type: artist, album, track"),
@@ -44,8 +52,12 @@ async def get_recommendations(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get personalized recommendations."""
-    query = select(Recommendation).where(Recommendation.confidence_score >= min_confidence)
+    """Get personalized recommendations with populated artist/album data."""
+    query = (
+        select(Recommendation)
+        .where(Recommendation.confidence_score >= min_confidence)
+        .where(Recommendation.expires_at > datetime.utcnow())
+    )
 
     if category:
         query = query.where(Recommendation.category == category)
@@ -62,7 +74,47 @@ async def get_recommendations(
     result = await db.execute(query)
     recommendations = result.scalars().all()
 
-    return recommendations
+    # Populate artist/album data
+    response = []
+    for rec in recommendations:
+        item = {
+            "id": rec.id,
+            "type": rec.recommendation_type,
+            "artist_id": rec.artist_id,
+            "album_id": rec.album_id,
+            "category": rec.category,
+            "reason": rec.reason,
+            "confidence_score": rec.confidence_score,
+            "relevance_score": rec.relevance_score,
+            "novelty_score": rec.novelty_score,
+            "artist_name": None,
+            "album_title": None,
+            "image_url": None,
+        }
+
+        if rec.artist_id:
+            artist_result = await db.execute(
+                select(Artist).where(Artist.id == rec.artist_id)
+            )
+            artist = artist_result.scalar_one_or_none()
+            if artist:
+                item["artist_name"] = artist.name
+                item["image_url"] = artist.image_url
+
+        if rec.album_id:
+            album_result = await db.execute(
+                select(Album).where(Album.id == rec.album_id)
+            )
+            album = album_result.scalar_one_or_none()
+            if album:
+                item["album_title"] = album.title
+                item["image_url"] = album.cover_url or item["image_url"]
+                if not item["artist_name"] and album.artist:
+                    item["artist_name"] = album.artist.name
+
+        response.append(item)
+
+    return response
 
 
 @router.get("/categories")
@@ -114,11 +166,12 @@ async def dismiss_recommendation(
     )
     rec = result.scalar_one_or_none()
 
-    if rec:
-        rec.dismissed = True
-        from datetime import datetime
-        rec.dismissed_at = datetime.utcnow()
-        await db.commit()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+
+    rec.dismissed = True
+    rec.dismissed_at = datetime.utcnow()
+    await db.commit()
 
     return {"status": "dismissed", "id": recommendation_id}
 
@@ -134,11 +187,12 @@ async def track_recommendation_click(
     )
     rec = result.scalar_one_or_none()
 
-    if rec:
-        rec.clicked = True
-        from datetime import datetime
-        rec.clicked_at = datetime.utcnow()
-        await db.commit()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+
+    rec.clicked = True
+    rec.clicked_at = datetime.utcnow()
+    await db.commit()
 
     return {"status": "tracked", "id": recommendation_id}
 
@@ -154,15 +208,59 @@ async def add_recommendation_to_wishlist(
     )
     rec = result.scalar_one_or_none()
 
-    if rec:
-        rec.added_to_wishlist = True
-        from datetime import datetime
-        rec.added_to_wishlist_at = datetime.utcnow()
-        await db.commit()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation not found")
 
-        # TODO: Actually create wishlist item
+    rec.added_to_wishlist = True
+    rec.added_to_wishlist_at = datetime.utcnow()
 
-    return {"status": "added_to_wishlist", "id": recommendation_id}
+    # Create wishlist item from recommendation
+    artist_name = None
+    album_title = None
+
+    if rec.artist_id:
+        artist_result = await db.execute(
+            select(Artist).where(Artist.id == rec.artist_id)
+        )
+        artist = artist_result.scalar_one_or_none()
+        if artist:
+            artist_name = artist.name
+
+    if rec.album_id:
+        album_result = await db.execute(
+            select(Album).where(Album.id == rec.album_id)
+        )
+        album = album_result.scalar_one_or_none()
+        if album:
+            album_title = album.title
+            if not artist_name and album.artist:
+                artist_name = album.artist.name
+
+    # Determine item type
+    item_type = rec.recommendation_type
+    if item_type == "track":
+        item_type = "album"  # Wishlist tracks as albums
+
+    wishlist_item = WishlistItem(
+        item_type=item_type,
+        artist_id=rec.artist_id,
+        album_id=rec.album_id,
+        artist_name=artist_name or "Unknown",
+        album_title=album_title,
+        status="wanted",
+        priority="medium",
+        source="recommendation",
+        confidence_score=rec.confidence_score,
+        notes=rec.reason,
+    )
+    db.add(wishlist_item)
+    await db.commit()
+
+    return {
+        "status": "added_to_wishlist",
+        "recommendation_id": recommendation_id,
+        "wishlist_item_id": wishlist_item.id,
+    }
 
 
 @router.post("/generate")
@@ -170,7 +268,19 @@ async def generate_recommendations(
     category: Optional[str] = Query(None, description="Generate for specific category"),
 ):
     """Manually trigger recommendation generation."""
-    # TODO: Queue Celery task
+    from app.tasks.recommendations import (
+        generate_daily_recommendations,
+        check_new_releases,
+        update_taste_profile,
+    )
+
+    if category == "release_radar":
+        check_new_releases.delay()
+    elif category == "taste_profile":
+        update_taste_profile.delay()
+    else:
+        generate_daily_recommendations.delay()
+
     return {"status": "generation_queued", "category": category or "all"}
 
 
@@ -179,12 +289,59 @@ async def get_recommendation_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Get recommendation statistics."""
-    # TODO: Calculate actual stats
+    total_result = await db.execute(
+        select(func.count(Recommendation.id))
+    )
+    total_generated = total_result.scalar() or 0
+
+    clicked_result = await db.execute(
+        select(func.count(Recommendation.id))
+        .where(Recommendation.clicked == True)
+    )
+    total_clicked = clicked_result.scalar() or 0
+
+    wishlisted_result = await db.execute(
+        select(func.count(Recommendation.id))
+        .where(Recommendation.added_to_wishlist == True)
+    )
+    total_wishlisted = wishlisted_result.scalar() or 0
+
+    dismissed_result = await db.execute(
+        select(func.count(Recommendation.id))
+        .where(Recommendation.dismissed == True)
+    )
+    total_dismissed = dismissed_result.scalar() or 0
+
+    # Active (not expired, not dismissed)
+    active_result = await db.execute(
+        select(func.count(Recommendation.id))
+        .where(Recommendation.dismissed == False)
+        .where(Recommendation.expires_at > datetime.utcnow())
+    )
+    total_active = active_result.scalar() or 0
+
+    # Category breakdown
+    category_result = await db.execute(
+        select(
+            Recommendation.category,
+            func.count(Recommendation.id).label("count"),
+        )
+        .where(Recommendation.dismissed == False)
+        .where(Recommendation.expires_at > datetime.utcnow())
+        .group_by(Recommendation.category)
+    )
+    categories = {row.category: row.count for row in category_result.all()}
+
+    click_rate = round(total_clicked / max(total_generated, 1) * 100, 1)
+    wishlist_rate = round(total_wishlisted / max(total_generated, 1) * 100, 1)
+
     return {
-        "total_generated": 0,
-        "total_clicked": 0,
-        "total_added_to_wishlist": 0,
-        "total_dismissed": 0,
-        "click_rate": 0.0,
-        "wishlist_rate": 0.0,
+        "total_generated": total_generated,
+        "total_active": total_active,
+        "total_clicked": total_clicked,
+        "total_added_to_wishlist": total_wishlisted,
+        "total_dismissed": total_dismissed,
+        "click_rate": click_rate,
+        "wishlist_rate": wishlist_rate,
+        "categories": categories,
     }

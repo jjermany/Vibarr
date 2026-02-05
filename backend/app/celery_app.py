@@ -75,5 +75,16 @@ celery_app.conf.update(
             "task": "app.tasks.recommendations.update_taste_profile",
             "schedule": crontab(minute=0, hour=4, day_of_week=0),  # Sunday 4 AM
         },
+        # Sync listening history every 2 hours
+        "sync-listening-history": {
+            "task": "app.tasks.sync.sync_listening_history",
+            "schedule": crontab(minute=15, hour="*/2"),
+            "kwargs": {"days": 7},
+        },
+        # Monitor active downloads every 5 minutes
+        "check-download-status": {
+            "task": "app.tasks.downloads.check_download_status",
+            "schedule": crontab(minute="*/5"),
+        },
     },
 )

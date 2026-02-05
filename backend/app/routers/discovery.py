@@ -1,11 +1,23 @@
 """Discovery endpoints for new music exploration."""
 
+import logging
 from typing import Optional, List
+from collections import Counter
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.artist import Artist
+from app.models.album import Album
+from app.models.track import Track
+from app.models.recommendation import Recommendation
+from app.models.listening_history import ListeningHistory
+from app.services.lastfm import lastfm_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -39,50 +51,213 @@ async def get_discovery_home(
     """
     Get personalized discovery home feed.
 
-    Returns curated sections:
-    - Your weekly discoveries
-    - New releases from artists you follow
-    - Because you listened to X
-    - Genre deep dives
-    - Time machine (decade exploration)
+    Returns curated sections built from actual recommendations:
+    - Release Radar (new releases from library artists)
+    - Because you listened to X (similar artist recs)
+    - Deep Cuts (lesser-known albums from known artists)
+    - Genre Spotlight
     """
-    sections = [
-        {
-            "id": "discover_weekly",
-            "title": "Discover Weekly",
-            "description": "Fresh picks based on your taste",
-            "type": "playlist",
-            "items": [],
-        },
-        {
-            "id": "release_radar",
-            "title": "Release Radar",
-            "description": "New releases from artists you follow",
-            "type": "album_list",
-            "items": [],
-        },
-        {
-            "id": "similar_to_recent",
-            "title": "Because You Listened To...",
-            "description": "Artists similar to your recent plays",
-            "type": "artist_list",
-            "items": [],
-        },
-        {
-            "id": "deep_cuts",
-            "title": "Deep Cuts",
-            "description": "Hidden gems from artists you know",
-            "type": "album_list",
-            "items": [],
-        },
-        {
-            "id": "genre_spotlight",
-            "title": "Genre Spotlight",
-            "description": "Explore your favorite genres",
-            "type": "genre_list",
-            "items": [],
-        },
-    ]
+    from datetime import datetime
+
+    sections = []
+
+    # 1. Release Radar - new releases from library artists
+    release_recs = await db.execute(
+        select(Recommendation)
+        .where(Recommendation.category == "release_radar")
+        .where(Recommendation.dismissed == False)
+        .where(Recommendation.expires_at > datetime.utcnow())
+        .order_by(Recommendation.confidence_score.desc())
+        .limit(20)
+    )
+    release_items = release_recs.scalars().all()
+    release_section_items = []
+    for rec in release_items:
+        item = {
+            "id": rec.id,
+            "recommendation_id": rec.id,
+            "type": rec.recommendation_type,
+            "reason": rec.reason,
+            "confidence": rec.confidence_score,
+        }
+        if rec.artist_id:
+            artist = await db.execute(select(Artist).where(Artist.id == rec.artist_id))
+            artist = artist.scalar_one_or_none()
+            if artist:
+                item["artist_name"] = artist.name
+                item["image_url"] = artist.image_url
+        if rec.album_id:
+            album = await db.execute(select(Album).where(Album.id == rec.album_id))
+            album = album.scalar_one_or_none()
+            if album:
+                item["title"] = album.title
+                item["image_url"] = album.cover_url or item.get("image_url")
+        release_section_items.append(item)
+
+    sections.append({
+        "id": "release_radar",
+        "title": "Release Radar",
+        "description": "New releases from artists you follow",
+        "type": "album_list",
+        "items": release_section_items,
+    })
+
+    # 2. Similar artists - "Because You Listened To..."
+    similar_recs = await db.execute(
+        select(Recommendation)
+        .where(Recommendation.category == "similar_artists")
+        .where(Recommendation.dismissed == False)
+        .where(Recommendation.expires_at > datetime.utcnow())
+        .order_by(Recommendation.confidence_score.desc())
+        .limit(20)
+    )
+    similar_items = similar_recs.scalars().all()
+    similar_section_items = []
+    for rec in similar_items:
+        item = {
+            "id": rec.id,
+            "recommendation_id": rec.id,
+            "type": "artist",
+            "reason": rec.reason,
+            "confidence": rec.confidence_score,
+        }
+        if rec.artist_id:
+            artist = await db.execute(select(Artist).where(Artist.id == rec.artist_id))
+            artist = artist.scalar_one_or_none()
+            if artist:
+                item["name"] = artist.name
+                item["image_url"] = artist.image_url
+                item["genres"] = artist.genres or []
+        similar_section_items.append(item)
+
+    sections.append({
+        "id": "similar_to_recent",
+        "title": "Because You Listened To...",
+        "description": "Artists similar to your recent plays",
+        "type": "artist_list",
+        "items": similar_section_items,
+    })
+
+    # 3. Deep Cuts
+    deep_recs = await db.execute(
+        select(Recommendation)
+        .where(Recommendation.category == "deep_cuts")
+        .where(Recommendation.dismissed == False)
+        .where(Recommendation.expires_at > datetime.utcnow())
+        .order_by(Recommendation.confidence_score.desc())
+        .limit(20)
+    )
+    deep_items = deep_recs.scalars().all()
+    deep_section_items = []
+    for rec in deep_items:
+        item = {
+            "id": rec.id,
+            "recommendation_id": rec.id,
+            "type": "album",
+            "reason": rec.reason,
+            "confidence": rec.confidence_score,
+        }
+        if rec.album_id:
+            album = await db.execute(select(Album).where(Album.id == rec.album_id))
+            album = album.scalar_one_or_none()
+            if album:
+                item["title"] = album.title
+                item["image_url"] = album.cover_url
+                if album.artist:
+                    item["artist_name"] = album.artist.name
+        elif rec.artist_id:
+            artist = await db.execute(select(Artist).where(Artist.id == rec.artist_id))
+            artist = artist.scalar_one_or_none()
+            if artist:
+                item["artist_name"] = artist.name
+                item["image_url"] = artist.image_url
+        deep_section_items.append(item)
+
+    sections.append({
+        "id": "deep_cuts",
+        "title": "Deep Cuts",
+        "description": "Hidden gems from artists you know",
+        "type": "album_list",
+        "items": deep_section_items,
+    })
+
+    # 4. Genre Spotlight - based on top genres in library
+    genre_result = await db.execute(
+        select(Artist.genres)
+        .where(Artist.in_library == True)
+        .where(Artist.genres.isnot(None))
+    )
+    all_genres = []
+    for row in genre_result:
+        if row[0]:
+            all_genres.extend(row[0])
+
+    genre_counts = Counter(all_genres)
+    top_genre = genre_counts.most_common(1)[0][0] if genre_counts else None
+
+    genre_items = []
+    if top_genre:
+        genre_artists = await db.execute(
+            select(Artist)
+            .where(Artist.in_library == False)
+            .where(Artist.genres.isnot(None))
+            .order_by(Artist.spotify_popularity.desc().nullslast())
+            .limit(50)
+        )
+        for artist in genre_artists.scalars().all():
+            if artist.genres and top_genre in artist.genres:
+                genre_items.append({
+                    "id": artist.id,
+                    "type": "artist",
+                    "name": artist.name,
+                    "image_url": artist.image_url,
+                    "genres": artist.genres or [],
+                })
+                if len(genre_items) >= 10:
+                    break
+
+    sections.append({
+        "id": "genre_spotlight",
+        "title": f"Genre Spotlight: {top_genre.title() if top_genre else 'Explore'}",
+        "description": f"Explore {top_genre if top_genre else 'new genres'}",
+        "type": "artist_list",
+        "items": genre_items,
+    })
+
+    # 5. Discover Weekly placeholder
+    discover_recs = await db.execute(
+        select(Recommendation)
+        .where(Recommendation.category.in_(["genre_explore", "mood_based"]))
+        .where(Recommendation.dismissed == False)
+        .where(Recommendation.expires_at > datetime.utcnow())
+        .order_by(Recommendation.confidence_score.desc())
+        .limit(15)
+    )
+    discover_items = discover_recs.scalars().all()
+    discover_section_items = []
+    for rec in discover_items:
+        item = {
+            "id": rec.id,
+            "recommendation_id": rec.id,
+            "type": rec.recommendation_type,
+            "reason": rec.reason,
+            "confidence": rec.confidence_score,
+        }
+        if rec.artist_id:
+            artist = await db.execute(select(Artist).where(Artist.id == rec.artist_id))
+            artist = artist.scalar_one_or_none()
+            if artist:
+                item["name"] = artist.name
+                item["image_url"] = artist.image_url
+        discover_section_items.append(item)
+
+    sections.insert(0, {
+        "id": "discover_weekly",
+        "title": "Discover Weekly",
+        "description": "Fresh picks based on your taste",
+        "type": "artist_list",
+        "items": discover_section_items,
+    })
 
     return {"sections": sections}
 
@@ -92,23 +267,44 @@ async def get_discovery_playlists(
     db: AsyncSession = Depends(get_db),
 ):
     """Get all generated discovery playlists."""
-    # TODO: Return actual generated playlists
-    playlists = [
-        DiscoveryPlaylist(
-            id="discover_weekly",
-            name="Discover Weekly",
-            description="Your weekly mix of fresh music",
-            track_count=30,
-            generated_at="2024-01-01T00:00:00Z",
-        ),
-        DiscoveryPlaylist(
-            id="release_radar",
-            name="Release Radar",
-            description="New music from artists you follow",
-            track_count=20,
-            generated_at="2024-01-01T00:00:00Z",
-        ),
-    ]
+    from datetime import datetime
+
+    # Count recommendations by category
+    categories = {
+        "discover_weekly": {
+            "categories": ["genre_explore", "mood_based", "similar_artists"],
+            "name": "Discover Weekly",
+            "description": "Your weekly mix of fresh music",
+        },
+        "release_radar": {
+            "categories": ["release_radar"],
+            "name": "Release Radar",
+            "description": "New music from artists you follow",
+        },
+        "deep_cuts": {
+            "categories": ["deep_cuts"],
+            "name": "Deep Cuts",
+            "description": "Hidden gems from artists you know",
+        },
+    }
+
+    playlists = []
+    for playlist_id, info in categories.items():
+        count_result = await db.execute(
+            select(func.count(Recommendation.id))
+            .where(Recommendation.category.in_(info["categories"]))
+            .where(Recommendation.dismissed == False)
+            .where(Recommendation.expires_at > datetime.utcnow())
+        )
+        count = count_result.scalar() or 0
+
+        playlists.append(DiscoveryPlaylist(
+            id=playlist_id,
+            name=info["name"],
+            description=info["description"],
+            track_count=count,
+            generated_at=datetime.utcnow().isoformat(),
+        ))
 
     return {"playlists": playlists}
 
@@ -120,11 +316,65 @@ async def get_similar_discoveries(
     db: AsyncSession = Depends(get_db),
 ):
     """Get discovery suggestions based on a specific artist."""
-    # TODO: Implement via Last.fm similar artists + Spotify
+    # Get the base artist
+    artist = await db.execute(select(Artist).where(Artist.id == artist_id))
+    artist = artist.scalar_one_or_none()
+    if not artist:
+        return {"based_on_artist_id": artist_id, "artists": [], "albums": []}
+
+    similar_artists = []
+    similar_albums = []
+
+    # Try Last.fm for similar artists
+    if lastfm_service.is_available:
+        try:
+            similar = await lastfm_service.get_similar_artists(artist.name, limit=limit)
+            for s in similar:
+                # Check if in our DB
+                db_result = await db.execute(
+                    select(Artist).where(
+                        func.lower(Artist.name) == s["name"].lower()
+                    )
+                )
+                db_artist = db_result.scalar_one_or_none()
+
+                similar_artists.append({
+                    "name": s.get("name"),
+                    "match": s.get("match", 0),
+                    "id": db_artist.id if db_artist else None,
+                    "image_url": db_artist.image_url if db_artist else None,
+                    "in_library": db_artist.in_library if db_artist else False,
+                    "genres": db_artist.genres if db_artist else [],
+                })
+        except Exception as e:
+            logger.error(f"Error getting similar artists for {artist.name}: {e}")
+
+    # Get recommendations already generated for this artist
+    recs = await db.execute(
+        select(Recommendation)
+        .where(Recommendation.based_on_artist_id == artist_id)
+        .where(Recommendation.dismissed == False)
+        .order_by(Recommendation.confidence_score.desc())
+        .limit(limit)
+    )
+    for rec in recs.scalars().all():
+        if rec.recommendation_type == "album" and rec.album_id:
+            album = await db.execute(select(Album).where(Album.id == rec.album_id))
+            album = album.scalar_one_or_none()
+            if album:
+                similar_albums.append({
+                    "id": album.id,
+                    "title": album.title,
+                    "cover_url": album.cover_url,
+                    "artist_name": album.artist.name if album.artist else "",
+                    "reason": rec.reason,
+                })
+
     return {
         "based_on_artist_id": artist_id,
-        "artists": [],
-        "albums": [],
+        "based_on_artist_name": artist.name,
+        "artists": similar_artists,
+        "albums": similar_albums,
     }
 
 
@@ -136,11 +386,69 @@ async def explore_genre(
     db: AsyncSession = Depends(get_db),
 ):
     """Explore a specific genre."""
+    # Find artists with this genre
+    artist_query = (
+        select(Artist)
+        .where(Artist.genres.isnot(None))
+    )
+
+    if sort == "popular":
+        artist_query = artist_query.order_by(Artist.spotify_popularity.desc().nullslast())
+    elif sort == "recent":
+        artist_query = artist_query.order_by(Artist.created_at.desc())
+    else:
+        artist_query = artist_query.order_by(func.random())
+
+    artist_query = artist_query.limit(200)
+    result = await db.execute(artist_query)
+
+    artists = []
+    albums = []
+    for a in result.scalars().all():
+        if a.genres and genre.lower() in [g.lower() for g in a.genres]:
+            artists.append({
+                "id": a.id,
+                "name": a.name,
+                "image_url": a.image_url,
+                "genres": a.genres,
+                "in_library": a.in_library,
+                "spotify_popularity": a.spotify_popularity,
+            })
+            if len(artists) >= limit:
+                break
+
+    # Get albums from these artists
+    artist_ids = [a["id"] for a in artists[:20]]
+    if artist_ids:
+        album_result = await db.execute(
+            select(Album)
+            .where(Album.artist_id.in_(artist_ids))
+            .order_by(Album.spotify_popularity.desc().nullslast())
+            .limit(limit)
+        )
+        for album in album_result.scalars().all():
+            albums.append({
+                "id": album.id,
+                "title": album.title,
+                "artist_name": album.artist.name if album.artist else "",
+                "cover_url": album.cover_url,
+                "release_year": album.release_year,
+                "in_library": album.in_library,
+            })
+
+    # Find related genres
+    all_genres = Counter()
+    for a in artists:
+        for g in a.get("genres", []):
+            if g.lower() != genre.lower():
+                all_genres[g] += 1
+    related_genres = [g for g, _ in all_genres.most_common(10)]
+
     return {
         "genre": genre,
-        "artists": [],
-        "albums": [],
-        "related_genres": [],
+        "artists": artists[:limit],
+        "albums": albums[:limit],
+        "related_genres": related_genres,
     }
 
 
@@ -152,11 +460,77 @@ async def explore_decade(
     db: AsyncSession = Depends(get_db),
 ):
     """Time machine - explore a specific decade."""
+    decade_start = decade
+    decade_end = decade + 9
+
+    album_query = (
+        select(Album)
+        .where(Album.release_year >= decade_start)
+        .where(Album.release_year <= decade_end)
+    )
+
+    if genre:
+        album_query = album_query.where(Album.genres.isnot(None))
+
+    album_query = album_query.order_by(
+        Album.spotify_popularity.desc().nullslast()
+    ).limit(200)
+
+    result = await db.execute(album_query)
+    albums_data = result.scalars().all()
+
+    albums = []
+    artists_seen = set()
+    highlights = []
+    for album in albums_data:
+        if genre and album.genres:
+            if genre.lower() not in [g.lower() for g in album.genres]:
+                continue
+
+        item = {
+            "id": album.id,
+            "title": album.title,
+            "artist_name": album.artist.name if album.artist else "",
+            "cover_url": album.cover_url,
+            "release_year": album.release_year,
+            "in_library": album.in_library,
+            "spotify_popularity": album.spotify_popularity,
+        }
+        albums.append(item)
+
+        # Track unique artists for highlights
+        if album.artist and album.artist.id not in artists_seen:
+            artists_seen.add(album.artist.id)
+
+        if len(albums) >= limit:
+            break
+
+    # Top albums as highlights
+    highlights = sorted(albums, key=lambda a: a.get("spotify_popularity") or 0, reverse=True)[:5]
+
+    # Get artists from the decade
+    artist_ids = list(artists_seen)[:30]
+    artists = []
+    if artist_ids:
+        artist_result = await db.execute(
+            select(Artist).where(Artist.id.in_(artist_ids))
+            .order_by(Artist.spotify_popularity.desc().nullslast())
+            .limit(limit)
+        )
+        for a in artist_result.scalars().all():
+            artists.append({
+                "id": a.id,
+                "name": a.name,
+                "image_url": a.image_url,
+                "in_library": a.in_library,
+            })
+
     return {
         "decade": decade,
-        "highlights": [],
-        "artists": [],
-        "albums": [],
+        "label": f"{decade}s",
+        "highlights": highlights,
+        "artists": artists,
+        "albums": albums,
     }
 
 
@@ -188,11 +562,60 @@ async def explore_mood(
 
     profile = mood_profiles.get(mood, {})
 
+    # Build query based on audio features
+    query = select(Track).join(Album, Track.album_id == Album.id)
+
+    for feature, (low, high) in profile.items():
+        if feature == "tempo":
+            query = query.where(Track.tempo >= low, Track.tempo <= high)
+        elif feature == "energy":
+            query = query.where(Track.energy >= low, Track.energy <= high)
+        elif feature == "valence":
+            query = query.where(Track.valence >= low, Track.valence <= high)
+        elif feature == "danceability":
+            query = query.where(Track.danceability >= low, Track.danceability <= high)
+        elif feature == "instrumentalness":
+            query = query.where(Track.instrumentalness >= low, Track.instrumentalness <= high)
+
+    query = query.order_by(Track.spotify_popularity.desc().nullslast()).limit(limit)
+
+    result = await db.execute(query)
+    tracks_data = result.scalars().all()
+
+    tracks = []
+    album_ids_seen = set()
+    albums = []
+
+    for track in tracks_data:
+        tracks.append({
+            "id": track.id,
+            "title": track.title,
+            "artist_name": track.album.artist.name if track.album and track.album.artist else "",
+            "album_title": track.album.title if track.album else "",
+            "duration_ms": track.duration_ms,
+            "energy": track.energy,
+            "valence": track.valence,
+            "danceability": track.danceability,
+            "tempo": track.tempo,
+        })
+
+        if track.album_id and track.album_id not in album_ids_seen:
+            album_ids_seen.add(track.album_id)
+            album = track.album
+            if album:
+                albums.append({
+                    "id": album.id,
+                    "title": album.title,
+                    "artist_name": album.artist.name if album.artist else "",
+                    "cover_url": album.cover_url,
+                    "in_library": album.in_library,
+                })
+
     return {
         "mood": mood,
         "audio_profile": profile,
-        "tracks": [],
-        "albums": [],
+        "tracks": tracks,
+        "albums": albums[:20],
     }
 
 
@@ -201,5 +624,9 @@ async def refresh_discoveries(
     db: AsyncSession = Depends(get_db),
 ):
     """Manually trigger discovery refresh."""
-    # TODO: Queue Celery task to regenerate recommendations
-    return {"status": "refresh_queued"}
+    from app.tasks.recommendations import generate_daily_recommendations, check_new_releases
+
+    generate_daily_recommendations.delay()
+    check_new_releases.delay()
+
+    return {"status": "refresh_queued", "message": "Recommendations and new release check queued"}

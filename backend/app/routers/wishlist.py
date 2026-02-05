@@ -195,12 +195,31 @@ async def search_wishlist_item(
     if not item:
         raise HTTPException(status_code=404, detail="Wishlist item not found")
 
-    # TODO: Queue Celery task to search Prowlarr
+    # Update status to searching
+    item.status = WishlistStatus.SEARCHING
+    await db.commit()
+
+    # Queue Celery task to search Prowlarr
+    from app.tasks.downloads import search_wishlist_item as search_task
+    search_task.delay(item_id)
+
     return {"status": "search_queued", "id": item_id}
 
 
 @router.post("/search-all")
-async def search_all_wishlist():
+async def search_all_wishlist(
+    db: AsyncSession = Depends(get_db),
+):
     """Search for all wanted wishlist items."""
-    # TODO: Queue Celery task
-    return {"status": "search_all_queued"}
+    from app.tasks.downloads import process_wishlist
+
+    # Count items to search
+    result = await db.execute(
+        select(WishlistItem)
+        .where(WishlistItem.status == WishlistStatus.WANTED)
+    )
+    items = result.scalars().all()
+
+    process_wishlist.delay()
+
+    return {"status": "search_all_queued", "items_to_search": len(items)}
