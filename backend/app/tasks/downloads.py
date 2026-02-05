@@ -124,6 +124,74 @@ async def _process_wishlist_async():
     }
 
 
+@celery_app.task(name="app.tasks.downloads.search_wishlist_item")
+def search_wishlist_item(item_id: int):
+    """Search for a specific wishlist item via Prowlarr."""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_search_wishlist_item_async(item_id))
+    finally:
+        loop.close()
+
+
+async def _search_wishlist_item_async(item_id: int):
+    """Async implementation of individual wishlist item search."""
+    logger.info(f"Searching for wishlist item {item_id}")
+
+    if not prowlarr_service.is_available:
+        return {"status": "skipped", "reason": "Prowlarr not configured"}
+
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(WishlistItem).where(WishlistItem.id == item_id)
+        )
+        item = result.scalar_one_or_none()
+
+        if not item:
+            return {"status": "error", "message": "Item not found"}
+
+        artist_name = item.artist_name or ""
+        album_title = item.album_title or ""
+
+        if not artist_name and not album_title:
+            item.status = WishlistStatus.WANTED
+            await db.commit()
+            return {"status": "error", "message": "No search terms"}
+
+        try:
+            item.status = WishlistStatus.SEARCHING
+            item.last_searched_at = datetime.utcnow()
+            item.search_count += 1
+            await db.commit()
+
+            results = await prowlarr_service.search_album(
+                artist=artist_name,
+                album=album_title,
+                preferred_format=item.preferred_format,
+            )
+
+            if results:
+                item.status = WishlistStatus.FOUND
+                await db.commit()
+                return {
+                    "status": "found",
+                    "results_count": len(results),
+                }
+            else:
+                item.status = WishlistStatus.WANTED
+                await db.commit()
+                return {"status": "not_found"}
+
+        except Exception as e:
+            logger.error(f"Error searching for wishlist item {item_id}: {e}")
+            item.status = WishlistStatus.WANTED
+            await db.commit()
+            return {"status": "error", "message": str(e)}
+
+
 @celery_app.task(name="app.tasks.downloads.search_for_album")
 def search_for_album(
     download_id: int,
