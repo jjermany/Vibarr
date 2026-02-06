@@ -8,6 +8,7 @@ from app.models.wishlist import WishlistItem
 from app.models.download import Download
 from app.models.recommendation import Recommendation
 from app.models.user_preference import UserPreference
+from app.models.quality_profile import QualityProfile
 
 __all__ = [
     "Artist",
@@ -18,4 +19,5 @@ __all__ = [
     "Download",
     "Recommendation",
     "UserPreference",
+    "QualityProfile",
 ]

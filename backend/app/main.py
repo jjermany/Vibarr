@@ -17,6 +17,7 @@ from app.routers import (
     library,
     recommendations,
     search,
+    settings,
     stats,
     wishlist,
 )
@@ -60,6 +61,7 @@ app.include_router(discovery.router, prefix="/api/discovery", tags=["Discovery"]
 app.include_router(recommendations.router, prefix="/api/recommendations", tags=["Recommendations"])
 app.include_router(wishlist.router, prefix="/api/wishlist", tags=["Wishlist"])
 app.include_router(downloads.router, prefix="/api/downloads", tags=["Downloads"])
+app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(stats.router, prefix="/api/stats", tags=["Statistics"])
 
 
