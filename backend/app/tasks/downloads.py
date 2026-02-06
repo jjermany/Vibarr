@@ -6,19 +6,28 @@ from datetime import datetime
 from app.celery_app import celery_app
 from app.database import AsyncSessionLocal
 from app.services.prowlarr import prowlarr_service
+from app.services.download_client import download_client_service
+from app.services.beets import beets_service
 from app.models.wishlist import WishlistItem, WishlistStatus
 from app.models.download import Download, DownloadStatus
 
 logger = logging.getLogger(__name__)
 
 
+def _run_async(coro):
+    """Run an async coroutine from a sync Celery task."""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 @celery_app.task(name="app.tasks.downloads.process_wishlist")
 def process_wishlist():
     """Process wishlist items and search for downloads."""
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _process_wishlist_async()
-    )
+    return _run_async(_process_wishlist_async())
 
 
 async def _process_wishlist_async():
@@ -28,10 +37,13 @@ async def _process_wishlist_async():
     if not prowlarr_service.is_available:
         return {"status": "skipped", "reason": "Prowlarr not available"}
 
+    from app.config import get_settings
+    settings = get_settings()
+
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
 
-        # Get wanted items
+        # Get wanted items with auto_download enabled
         result = await db.execute(
             select(WishlistItem)
             .where(WishlistItem.status == WishlistStatus.WANTED)
@@ -41,6 +53,7 @@ async def _process_wishlist_async():
 
         searched = 0
         found = 0
+        grabbed = 0
 
         for item in items:
             try:
@@ -50,23 +63,23 @@ async def _process_wishlist_async():
                 item.search_count += 1
                 await db.commit()
 
-                # Build search query
                 artist_name = item.artist_name or ""
                 album_title = item.album_title or ""
 
                 if not artist_name and not album_title:
+                    item.status = WishlistStatus.WANTED
+                    await db.commit()
                     continue
 
                 # Search via Prowlarr
                 results = await prowlarr_service.search_album(
                     artist=artist_name,
                     album=album_title,
-                    preferred_format=item.preferred_format,
+                    preferred_format=item.preferred_format or settings.preferred_quality,
                 )
                 searched += 1
 
                 if results:
-                    # Found results
                     best_result = results[0]  # Already sorted by score
 
                     item.status = WishlistStatus.FOUND
@@ -81,6 +94,7 @@ async def _process_wishlist_async():
                         status=DownloadStatus.FOUND,
                         search_query=f"{artist_name} {album_title}",
                         indexer_name=best_result.get("indexer"),
+                        indexer_id=str(best_result.get("indexer_id", "")),
                         release_title=best_result.get("title"),
                         release_size=best_result.get("size"),
                         release_format=best_result.get("format"),
@@ -90,26 +104,35 @@ async def _process_wishlist_async():
                         source="wishlist",
                     )
                     db.add(download)
+                    await db.commit()
+                    await db.refresh(download)
 
-                    # If auto-download is enabled and score is high enough
-                    from app.config import get_settings
-                    settings = get_settings()
-
+                    # Auto-grab if score meets threshold
                     if (
                         settings.auto_download_enabled
-                        and best_result.get("score", 0) >= settings.auto_download_confidence_threshold * 100
+                        and best_result.get("score", 0)
+                        >= settings.auto_download_confidence_threshold * 100
                     ):
-                        # Queue the grab
-                        grab_release.delay(
-                            download_id=download.id,
-                            guid=best_result.get("guid"),
-                            indexer_id=best_result.get("indexer_id"),
-                        )
-                else:
-                    # No results found
-                    item.status = WishlistStatus.WANTED  # Reset to try again later
+                        # Check concurrent download limit
+                        active_count = 0
+                        if download_client_service.is_configured:
+                            active_count = await download_client_service.get_active_count()
 
-                await db.commit()
+                        if active_count < settings.max_concurrent_downloads:
+                            grab_release.delay(
+                                download_id=download.id,
+                                guid=best_result.get("guid"),
+                                indexer_id=best_result.get("indexer_id"),
+                            )
+                            grabbed += 1
+                        else:
+                            logger.info(
+                                f"Skipping auto-grab for '{album_title}': "
+                                f"concurrent limit reached ({active_count}/{settings.max_concurrent_downloads})"
+                            )
+                else:
+                    item.status = WishlistStatus.WANTED
+                    await db.commit()
 
             except Exception as e:
                 logger.error(f"Error processing wishlist item {item.id}: {e}")
@@ -121,18 +144,14 @@ async def _process_wishlist_async():
         "status": "completed",
         "items_searched": searched,
         "items_found": found,
+        "items_grabbed": grabbed,
     }
 
 
 @celery_app.task(name="app.tasks.downloads.search_wishlist_item")
 def search_wishlist_item(item_id: int):
     """Search for a specific wishlist item via Prowlarr."""
-    import asyncio
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(_search_wishlist_item_async(item_id))
-    finally:
-        loop.close()
+    return _run_async(_search_wishlist_item_async(item_id))
 
 
 async def _search_wishlist_item_async(item_id: int):
@@ -200,8 +219,7 @@ def search_for_album(
     preferred_format: str = None,
 ):
     """Search for a specific album."""
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
+    return _run_async(
         _search_for_album_async(download_id, artist, album, preferred_format)
     )
 
@@ -221,7 +239,6 @@ async def _search_for_album_async(
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
 
-        # Get download entry
         result = await db.execute(
             select(Download).where(Download.id == download_id)
         )
@@ -234,7 +251,6 @@ async def _search_for_album_async(
             download.status = DownloadStatus.SEARCHING
             await db.commit()
 
-            # Search
             results = await prowlarr_service.search_album(
                 artist=artist,
                 album=album,
@@ -245,6 +261,7 @@ async def _search_for_album_async(
                 best_result = results[0]
                 download.status = DownloadStatus.FOUND
                 download.indexer_name = best_result.get("indexer")
+                download.indexer_id = str(best_result.get("indexer_id", ""))
                 download.release_title = best_result.get("title")
                 download.release_size = best_result.get("size")
                 download.release_format = best_result.get("format")
@@ -280,10 +297,7 @@ async def _search_for_album_async(
 @celery_app.task(name="app.tasks.downloads.grab_release")
 def grab_release(download_id: int, guid: str, indexer_id: int):
     """Grab a release and send to download client."""
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _grab_release_async(download_id, guid, indexer_id)
-    )
+    return _run_async(_grab_release_async(download_id, guid, indexer_id))
 
 
 async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
@@ -308,19 +322,21 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
             download.status = DownloadStatus.QUEUED
             await db.commit()
 
-            # Grab via Prowlarr
+            # Grab via Prowlarr (sends to download client)
             download_client_id = await prowlarr_service.grab(guid, indexer_id)
 
             if download_client_id:
                 download.status = DownloadStatus.DOWNLOADING
-                download.download_id = download_client_id
+                download.download_id = str(download_client_id)
                 download.started_at = datetime.utcnow()
                 await db.commit()
 
                 # Update associated wishlist item
                 if download.wishlist_id:
                     wishlist_result = await db.execute(
-                        select(WishlistItem).where(WishlistItem.id == download.wishlist_id)
+                        select(WishlistItem).where(
+                            WishlistItem.id == download.wishlist_id
+                        )
                     )
                     wishlist_item = wishlist_result.scalar_one_or_none()
                     if wishlist_item:
@@ -334,7 +350,7 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
                 }
             else:
                 download.status = DownloadStatus.FAILED
-                download.status_message = "Failed to grab release"
+                download.status_message = "Failed to grab release from Prowlarr"
                 await db.commit()
                 return {"status": "error", "message": "Failed to grab release"}
 
@@ -348,34 +364,112 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
 
 @celery_app.task(name="app.tasks.downloads.check_download_status")
 def check_download_status():
-    """Check status of active downloads."""
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _check_download_status_async()
-    )
+    """Check status of active downloads via qBittorrent."""
+    return _run_async(_check_download_status_async())
 
 
 async def _check_download_status_async():
-    """Check and update download statuses."""
+    """Check and update download statuses from qBittorrent."""
     logger.info("Checking download statuses")
 
-    # TODO: Implement download client status checking
-    # This would integrate with qBittorrent or other download clients
+    if not download_client_service.is_configured:
+        return {"status": "skipped", "reason": "Download client not configured"}
 
-    return {"status": "completed"}
+    from app.config import get_settings
+    settings = get_settings()
+
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import select
+
+        # Get all downloads that are actively downloading
+        result = await db.execute(
+            select(Download).where(
+                Download.status == DownloadStatus.DOWNLOADING,
+                Download.download_id.isnot(None),
+            )
+        )
+        active_downloads = result.scalars().all()
+
+        if not active_downloads:
+            return {"status": "completed", "checked": 0}
+
+        updated = 0
+        completed = 0
+
+        for download in active_downloads:
+            try:
+                torrent = await download_client_service.get_torrent(
+                    download.download_id
+                )
+
+                if not torrent:
+                    logger.warning(
+                        f"Torrent {download.download_id} not found in client "
+                        f"for download {download.id}"
+                    )
+                    continue
+
+                # Update progress info
+                download.progress = torrent.progress
+                download.download_speed = torrent.dl_speed
+                download.eta_seconds = torrent.eta if torrent.eta < 8640000 else None
+                download.download_path = torrent.content_path or torrent.save_path
+                updated += 1
+
+                if torrent.is_complete:
+                    download.status = DownloadStatus.COMPLETED
+                    download.progress = 100.0
+                    download.completed_at = datetime.utcnow()
+                    download.download_speed = None
+                    download.eta_seconds = None
+                    completed += 1
+
+                    # Update wishlist item
+                    if download.wishlist_id:
+                        wishlist_result = await db.execute(
+                            select(WishlistItem).where(
+                                WishlistItem.id == download.wishlist_id
+                            )
+                        )
+                        wishlist_item = wishlist_result.scalar_one_or_none()
+                        if wishlist_item:
+                            wishlist_item.status = WishlistStatus.DOWNLOADED
+                            await db.commit()
+
+                    # Auto-import with beets if enabled
+                    if settings.beets_enabled and settings.beets_auto_import:
+                        import_completed_download.delay(download_id=download.id)
+                        download.status = DownloadStatus.IMPORTING
+
+                elif torrent.is_errored:
+                    download.status = DownloadStatus.FAILED
+                    download.status_message = f"Download client error: {torrent.state}"
+                    download.completed_at = datetime.utcnow()
+
+                await db.commit()
+
+            except Exception as e:
+                logger.error(
+                    f"Error checking download {download.id}: {e}"
+                )
+                continue
+
+    return {
+        "status": "completed",
+        "checked": len(active_downloads),
+        "updated": updated,
+        "completed": completed,
+    }
 
 
 @celery_app.task(name="app.tasks.downloads.import_completed_download")
 def import_completed_download(download_id: int):
     """Import a completed download via beets."""
-    import asyncio
-    return asyncio.get_event_loop().run_until_complete(
-        _import_completed_download_async(download_id)
-    )
+    return _run_async(_import_completed_download_async(download_id))
 
 
 async def _import_completed_download_async(download_id: int):
-    """Async implementation of download import."""
+    """Import a completed download using beets for tagging and organization."""
     logger.info(f"Importing download {download_id}")
 
     async with AsyncSessionLocal() as db:
@@ -390,24 +484,68 @@ async def _import_completed_download_async(download_id: int):
             return {"status": "error", "message": "Download not found"}
 
         if not download.download_path:
-            return {"status": "error", "message": "No download path"}
+            # Try to get path from download client
+            if download.download_id and download_client_service.is_configured:
+                torrent = await download_client_service.get_torrent(
+                    download.download_id
+                )
+                if torrent:
+                    download.download_path = torrent.content_path or torrent.save_path
+                    await db.commit()
+
+            if not download.download_path:
+                download.status = DownloadStatus.FAILED
+                download.status_message = "No download path available for import"
+                await db.commit()
+                return {"status": "error", "message": "No download path"}
 
         try:
             download.status = DownloadStatus.IMPORTING
+            download.status_message = "Importing with beets..."
             await db.commit()
 
-            # TODO: Implement beets import
-            # This would call beets to import, tag, and organize the download
+            if beets_service.is_available:
+                # Run beets import
+                import_result = await beets_service.import_directory(
+                    source_path=download.download_path,
+                    artist_hint=download.artist_name,
+                    album_hint=download.album_title,
+                )
 
-            download.status = DownloadStatus.COMPLETED
-            download.completed_at = datetime.utcnow()
-            download.beets_imported = True
+                if import_result.success:
+                    download.status = DownloadStatus.COMPLETED
+                    download.completed_at = datetime.utcnow()
+                    download.beets_imported = True
+                    download.final_path = import_result.final_path
+                    download.status_message = (
+                        f"Imported {import_result.albums_imported} album(s), "
+                        f"{import_result.tracks_imported} track(s)"
+                    )
+                else:
+                    # Beets import failed but download is complete
+                    download.status = DownloadStatus.COMPLETED
+                    download.completed_at = datetime.utcnow()
+                    download.beets_imported = False
+                    download.status_message = f"Beets import failed: {import_result.error}"
+                    logger.error(
+                        f"Beets import failed for download {download_id}: "
+                        f"{import_result.error}"
+                    )
+            else:
+                # Beets not available, just mark as completed
+                download.status = DownloadStatus.COMPLETED
+                download.completed_at = datetime.utcnow()
+                download.beets_imported = False
+                download.status_message = "Download complete (beets not available)"
+
             await db.commit()
 
             # Update wishlist item
             if download.wishlist_id:
                 wishlist_result = await db.execute(
-                    select(WishlistItem).where(WishlistItem.id == download.wishlist_id)
+                    select(WishlistItem).where(
+                        WishlistItem.id == download.wishlist_id
+                    )
                 )
                 wishlist_item = wishlist_result.scalar_one_or_none()
                 if wishlist_item:
@@ -417,6 +555,8 @@ async def _import_completed_download_async(download_id: int):
             return {
                 "status": "completed",
                 "download_id": download_id,
+                "beets_imported": download.beets_imported,
+                "final_path": download.final_path,
             }
 
         except Exception as e:

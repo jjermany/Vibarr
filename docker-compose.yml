@@ -54,8 +54,29 @@ services:
       PROWLARR_URL: ${PROWLARR_URL}
       PROWLARR_API_KEY: ${PROWLARR_API_KEY}
       MUSICBRAINZ_USER_AGENT: ${MUSICBRAINZ_USER_AGENT:-Vibarr/1.0}
+      # Download client
+      QBITTORRENT_URL: ${QBITTORRENT_URL}
+      QBITTORRENT_USERNAME: ${QBITTORRENT_USERNAME:-admin}
+      QBITTORRENT_PASSWORD: ${QBITTORRENT_PASSWORD}
+      QBITTORRENT_CATEGORY: ${QBITTORRENT_CATEGORY:-vibarr}
+      # Beets
+      BEETS_ENABLED: ${BEETS_ENABLED:-false}
+      BEETS_CONFIG_PATH: ${BEETS_CONFIG_PATH:-/config/beets/config.yaml}
+      BEETS_LIBRARY_PATH: ${BEETS_LIBRARY_PATH:-/music}
+      BEETS_AUTO_IMPORT: ${BEETS_AUTO_IMPORT:-true}
+      BEETS_MOVE_FILES: ${BEETS_MOVE_FILES:-true}
+      # Download settings
+      AUTO_DOWNLOAD_ENABLED: ${AUTO_DOWNLOAD_ENABLED:-false}
+      AUTO_DOWNLOAD_CONFIDENCE_THRESHOLD: ${AUTO_DOWNLOAD_CONFIDENCE_THRESHOLD:-0.8}
+      PREFERRED_QUALITY: ${PREFERRED_QUALITY:-flac}
+      MAX_CONCURRENT_DOWNLOADS: ${MAX_CONCURRENT_DOWNLOADS:-3}
+      DOWNLOAD_PATH: ${DOWNLOAD_PATH:-/downloads}
+      COMPLETED_DOWNLOAD_PATH: ${COMPLETED_DOWNLOAD_PATH:-/downloads/completed}
     volumes:
       - ./backend:/app
+      - downloads:/downloads
+      - music:/music
+      - beets_config:/config/beets
     ports:
       - "8000:8000"
     depends_on:
@@ -84,8 +105,26 @@ services:
       PLEX_TOKEN: ${PLEX_TOKEN}
       PROWLARR_URL: ${PROWLARR_URL}
       PROWLARR_API_KEY: ${PROWLARR_API_KEY}
+      QBITTORRENT_URL: ${QBITTORRENT_URL}
+      QBITTORRENT_USERNAME: ${QBITTORRENT_USERNAME:-admin}
+      QBITTORRENT_PASSWORD: ${QBITTORRENT_PASSWORD}
+      QBITTORRENT_CATEGORY: ${QBITTORRENT_CATEGORY:-vibarr}
+      BEETS_ENABLED: ${BEETS_ENABLED:-false}
+      BEETS_CONFIG_PATH: ${BEETS_CONFIG_PATH:-/config/beets/config.yaml}
+      BEETS_LIBRARY_PATH: ${BEETS_LIBRARY_PATH:-/music}
+      BEETS_AUTO_IMPORT: ${BEETS_AUTO_IMPORT:-true}
+      BEETS_MOVE_FILES: ${BEETS_MOVE_FILES:-true}
+      AUTO_DOWNLOAD_ENABLED: ${AUTO_DOWNLOAD_ENABLED:-false}
+      AUTO_DOWNLOAD_CONFIDENCE_THRESHOLD: ${AUTO_DOWNLOAD_CONFIDENCE_THRESHOLD:-0.8}
+      PREFERRED_QUALITY: ${PREFERRED_QUALITY:-flac}
+      MAX_CONCURRENT_DOWNLOADS: ${MAX_CONCURRENT_DOWNLOADS:-3}
+      DOWNLOAD_PATH: ${DOWNLOAD_PATH:-/downloads}
+      COMPLETED_DOWNLOAD_PATH: ${COMPLETED_DOWNLOAD_PATH:-/downloads/completed}
     volumes:
       - ./backend:/app
+      - downloads:/downloads
+      - music:/music
+      - beets_config:/config/beets
     depends_on:
       db:
         condition: service_healthy
@@ -134,3 +173,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  downloads:
+  music:
+  beets_config:

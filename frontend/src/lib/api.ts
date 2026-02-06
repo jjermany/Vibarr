@@ -154,9 +154,84 @@ export interface Download {
   release_format?: string
   release_quality?: string
   seeders?: number
+  leechers?: number
   progress: number
+  download_speed?: number
+  eta_seconds?: number
   source: string
+  beets_imported: boolean
+  final_path?: string
   created_at: string
+  started_at?: string
+  completed_at?: string
+}
+
+export interface DownloadStats {
+  total: number
+  pending: number
+  searching: number
+  downloading: number
+  importing: number
+  completed: number
+  failed: number
+  active_client_downloads: number
+}
+
+export interface ReleaseSearchResult {
+  guid: string
+  indexer?: string
+  indexer_id?: number
+  title: string
+  size: number
+  format?: string
+  quality?: string
+  seeders: number
+  leechers: number
+  download_url?: string
+  score: number
+}
+
+export interface GrabRequest {
+  guid: string
+  indexer_id: number
+  download_id?: number
+  artist_name?: string
+  album_title?: string
+  release_title?: string
+  release_size?: number
+  release_format?: string
+  release_quality?: string
+  seeders?: number
+  indexer_name?: string
+}
+
+export interface QualityProfile {
+  id: number
+  name: string
+  description?: string
+  is_default: boolean
+  preferred_formats: string[]
+  min_quality: string
+  max_size_mb: number
+  min_seeders: number
+  prefer_well_seeded: boolean
+  format_match_weight: number
+  seeder_weight: number
+}
+
+export interface ServiceStatus {
+  prowlarr: { configured: boolean; connected: boolean }
+  qbittorrent: { configured: boolean; connected: boolean; url?: string; category?: string; version?: string }
+  beets: { available: boolean; version?: string; reason?: string }
+}
+
+export interface DownloadSettings {
+  auto_download_enabled: boolean
+  auto_download_confidence_threshold: number
+  preferred_quality: string
+  max_concurrent_downloads: number
+  download_path: string
+  completed_download_path: string
 }
 
 export interface LibraryStats {
@@ -304,13 +379,43 @@ export const wishlistApi = {
 }
 
 export const downloadsApi = {
-  list: () => api.get<Download[]>('/api/downloads'),
+  list: (params?: { status?: string; source?: string; limit?: number }) =>
+    api.get<Download[]>('/api/downloads', { params }),
+  stats: () => api.get<DownloadStats>('/api/downloads/stats'),
   queue: () => api.get<Download[]>('/api/downloads/queue'),
-  history: () => api.get<Download[]>('/api/downloads/history'),
+  history: (limit?: number) =>
+    api.get<Download[]>('/api/downloads/history', { params: { limit } }),
   get: (id: number) => api.get<Download>(`/api/downloads/${id}`),
-  add: (data: any) => api.post('/api/downloads', data),
+  add: (data: { artist_name: string; album_title: string; preferred_format?: string; album_id?: number; wishlist_id?: number }) =>
+    api.post<Download>('/api/downloads', data),
   cancel: (id: number) => api.delete(`/api/downloads/${id}`),
-  retry: (id: number) => api.post(`/api/downloads/${id}/retry`),
+  retry: (id: number) => api.post<Download>(`/api/downloads/${id}/retry`),
+  pause: (id: number) => api.post(`/api/downloads/${id}/pause`),
+  resume: (id: number) => api.post(`/api/downloads/${id}/resume`),
+  search: (artist: string, album: string, format?: string) =>
+    api.post<ReleaseSearchResult[]>('/api/downloads/search', null, {
+      params: { artist, album, format },
+    }),
+  grab: (data: GrabRequest) => api.post<Download>('/api/downloads/grab', data),
+}
+
+export const settingsApi = {
+  getDownloadSettings: () =>
+    api.get<DownloadSettings>('/api/settings/download'),
+  getServiceStatus: () =>
+    api.get<ServiceStatus>('/api/settings/services'),
+  getQualityProfiles: () =>
+    api.get<QualityProfile[]>('/api/settings/quality-profiles'),
+  createQualityProfile: (data: Partial<QualityProfile>) =>
+    api.post<QualityProfile>('/api/settings/quality-profiles', data),
+  updateQualityProfile: (id: number, data: Partial<QualityProfile>) =>
+    api.patch<QualityProfile>(`/api/settings/quality-profiles/${id}`, data),
+  deleteQualityProfile: (id: number) =>
+    api.delete(`/api/settings/quality-profiles/${id}`),
+  getBeetsConfig: () => api.get('/api/settings/beets/config'),
+  getBeetsLibrary: (query?: string) =>
+    api.get('/api/settings/beets/library', { params: { query } }),
+  generateBeetsConfig: () => api.post('/api/settings/beets/generate-config'),
 }
 
 export const statsApi = {

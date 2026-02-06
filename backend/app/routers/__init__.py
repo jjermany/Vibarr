@@ -9,6 +9,7 @@ from app.routers import (
     library,
     recommendations,
     search,
+    settings,
     stats,
     wishlist,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "library",
     "recommendations",
     "search",
+    "settings",
     "stats",
     "wishlist",
 ]

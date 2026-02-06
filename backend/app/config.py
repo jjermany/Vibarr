@@ -62,6 +62,22 @@ class Settings(BaseSettings):
     auto_download_enabled: bool = False
     auto_download_confidence_threshold: float = 0.8
     preferred_quality: str = "flac"  # flac, 320, v0
+    max_concurrent_downloads: int = 3
+    download_path: str = "/downloads"
+    completed_download_path: str = "/downloads/completed"
+
+    # qBittorrent
+    qbittorrent_url: Optional[str] = None
+    qbittorrent_username: str = "admin"
+    qbittorrent_password: str = ""
+    qbittorrent_category: str = "vibarr"
+
+    # Beets
+    beets_enabled: bool = False
+    beets_config_path: str = "/config/beets/config.yaml"
+    beets_library_path: str = "/music"
+    beets_auto_import: bool = True
+    beets_move_files: bool = True  # Move vs copy after import
 
     @property
     def async_database_url(self) -> str:
