@@ -295,6 +295,130 @@ export interface TasteProfile {
   novelty_preference: number
 }
 
+// Phase 5 Types
+
+export interface AppUser {
+  id: number
+  username: string
+  email?: string
+  display_name: string
+  avatar_url?: string
+  bio?: string
+  is_admin: boolean
+  profile_public: boolean
+  share_listening_activity: boolean
+  share_library: boolean
+  taste_cluster?: string
+  taste_tags: string[]
+  created_at: string
+}
+
+export interface UserProfile extends AppUser {
+  follower_count: number
+  following_count: number
+  is_following: boolean
+}
+
+export interface FollowUser {
+  id: number
+  username: string
+  display_name: string
+  avatar_url?: string
+  taste_cluster?: string
+}
+
+export interface SharedPlaylist {
+  id: number
+  name: string
+  description?: string
+  cover_url?: string
+  is_public: boolean
+  collaborative: boolean
+  total_tracks: number
+  owner?: { id: number; display_name: string }
+  items?: SharedPlaylistItem[]
+  created_at: string
+  updated_at: string
+}
+
+export interface SharedPlaylistItem {
+  id: number
+  position: number
+  track_id?: number
+  album_id?: number
+  artist_id?: number
+  note?: string
+  added_by_id: number
+  created_at: string
+}
+
+export interface ActivityItem {
+  id: number
+  user?: { id: number; display_name: string; avatar_url?: string }
+  activity_type: string
+  message?: string
+  artist_id?: number
+  album_id?: number
+  track_id?: number
+  playlist_id?: number
+  metadata?: Record<string, any>
+  created_at: string
+}
+
+export interface CompatibilityResult {
+  compatibility_score: number | null
+  user?: { id: number; display_name: string; taste_cluster?: string }
+  per_feature: Record<string, number>
+  message?: string
+}
+
+export interface AutomationRule {
+  id: number
+  name: string
+  description?: string
+  is_enabled: boolean
+  trigger: string
+  schedule_cron?: string
+  conditions: RuleCondition[]
+  actions: RuleAction[]
+  priority: number
+  last_triggered_at?: string
+  trigger_count: number
+  last_error?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RuleCondition {
+  field: string
+  operator: string
+  value: any
+}
+
+export interface RuleAction {
+  type: string
+  params: Record<string, any>
+}
+
+export interface AutomationLog {
+  id: number
+  rule_id: number
+  trigger_type: string
+  success: boolean
+  actions_executed: Record<string, any>[]
+  error_message?: string
+  matched_items?: Record<string, any>[]
+  created_at: string
+}
+
+export interface AutomationStats {
+  total_rules: number
+  active_rules: number
+  total_executions: number
+  successful_executions: number
+  failed_executions: number
+}
+
 // API Functions
 
 export const searchApi = {
@@ -444,6 +568,63 @@ export const statsApi = {
     api.get('/api/stats/library-growth', { params: { days } }),
   comparison: (days?: number) =>
     api.get('/api/stats/comparison', { params: { days } }),
+}
+
+// Phase 5: Authentication
+export const authApi = {
+  register: (data: { username: string; email: string; password: string; display_name?: string }) =>
+    api.post('/api/auth/register', data),
+  login: (data: { username: string; password: string }) =>
+    api.post('/api/auth/login', data),
+  getProfile: () => api.get<AppUser>('/api/auth/me'),
+  updateProfile: (data: Partial<AppUser>) => api.patch('/api/auth/me', data),
+  listUsers: () => api.get<AppUser[]>('/api/auth/users'),
+  getUser: (userId: number) => api.get<UserProfile>(`/api/auth/users/${userId}`),
+}
+
+// Phase 5: Social
+export const socialApi = {
+  follow: (userId: number) => api.post('/api/social/follow', { user_id: userId }),
+  unfollow: (userId: number) => api.delete(`/api/social/follow/${userId}`),
+  getFollowers: (userId: number) => api.get<FollowUser[]>(`/api/social/followers/${userId}`),
+  getFollowing: (userId: number) => api.get<FollowUser[]>(`/api/social/following/${userId}`),
+  getCompatibility: (userId: number) => api.get<CompatibilityResult>(`/api/social/compatibility/${userId}`),
+  // Playlists
+  listPlaylists: () => api.get<SharedPlaylist[]>('/api/social/playlists'),
+  createPlaylist: (data: { name: string; description?: string; is_public?: boolean; collaborative?: boolean }) =>
+    api.post<SharedPlaylist>('/api/social/playlists', data),
+  getPlaylist: (id: number) => api.get<SharedPlaylist>(`/api/social/playlists/${id}`),
+  updatePlaylist: (id: number, data: Partial<SharedPlaylist>) =>
+    api.patch(`/api/social/playlists/${id}`, data),
+  deletePlaylist: (id: number) => api.delete(`/api/social/playlists/${id}`),
+  addPlaylistItem: (playlistId: number, data: { track_id?: number; album_id?: number; artist_id?: number; note?: string }) =>
+    api.post(`/api/social/playlists/${playlistId}/items`, data),
+  removePlaylistItem: (playlistId: number, itemId: number) =>
+    api.delete(`/api/social/playlists/${playlistId}/items/${itemId}`),
+  // Activity
+  getActivity: (days?: number, limit?: number) =>
+    api.get<ActivityItem[]>('/api/social/activity', { params: { days, limit } }),
+  getGlobalActivity: (limit?: number) =>
+    api.get<ActivityItem[]>('/api/social/activity/global', { params: { limit } }),
+}
+
+// Phase 5: Automation
+export const automationApi = {
+  listRules: (params?: { trigger?: string; enabled_only?: boolean }) =>
+    api.get<AutomationRule[]>('/api/automation', { params }),
+  createRule: (data: Partial<AutomationRule>) =>
+    api.post<AutomationRule>('/api/automation', data),
+  getTriggers: () => api.get('/api/automation/triggers'),
+  getRule: (id: number) => api.get<AutomationRule>(`/api/automation/${id}`),
+  updateRule: (id: number, data: Partial<AutomationRule>) =>
+    api.patch<AutomationRule>(`/api/automation/${id}`, data),
+  deleteRule: (id: number) => api.delete(`/api/automation/${id}`),
+  testRule: (id: number, data: { item: Record<string, any>; item_type?: string }) =>
+    api.post(`/api/automation/${id}/test`, data),
+  toggleRule: (id: number) => api.post(`/api/automation/${id}/toggle`),
+  getRuleLogs: (id: number, limit?: number) =>
+    api.get<AutomationLog[]>(`/api/automation/${id}/logs`, { params: { limit } }),
+  getStats: () => api.get<AutomationStats>('/api/automation/stats/summary'),
 }
 
 export default api

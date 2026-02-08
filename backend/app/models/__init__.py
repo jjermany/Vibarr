@@ -9,6 +9,9 @@ from app.models.download import Download
 from app.models.recommendation import Recommendation
 from app.models.user_preference import UserPreference
 from app.models.quality_profile import QualityProfile
+from app.models.user import User
+from app.models.social import UserFollow, SharedPlaylist, SharedPlaylistItem, ActivityFeed
+from app.models.automation_rule import AutomationRule, AutomationLog
 
 __all__ = [
     "Artist",
@@ -20,4 +23,11 @@ __all__ = [
     "Recommendation",
     "UserPreference",
     "QualityProfile",
+    "User",
+    "UserFollow",
+    "SharedPlaylist",
+    "SharedPlaylistItem",
+    "ActivityFeed",
+    "AutomationRule",
+    "AutomationLog",
 ]
