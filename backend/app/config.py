@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "Vibarr"
-    app_version: str = "0.1.0"
+    app_version: str = "0.5.0"
     debug: bool = False
     secret_key: str = "change-me-in-production"
 
@@ -78,6 +78,14 @@ class Settings(BaseSettings):
     beets_library_path: str = "/music"
     beets_auto_import: bool = True
     beets_move_files: bool = True  # Move vs copy after import
+
+    # Multi-user settings
+    registration_enabled: bool = True
+    max_users: int = 10  # Maximum users for household deployment
+
+    # ML Taste Profiling
+    ml_profiling_enabled: bool = True
+    taste_embedding_half_life_days: float = 21.0
 
     @property
     def async_database_url(self) -> str:

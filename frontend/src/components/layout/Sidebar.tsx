@@ -13,6 +13,9 @@ import {
   Settings,
   Music2,
   X,
+  Users,
+  Zap,
+  User,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -24,6 +27,9 @@ const navigation = [
   { name: 'Wishlist', href: '/wishlist', icon: Heart },
   { name: 'Downloads', href: '/downloads', icon: Download },
   { name: 'Stats', href: '/stats', icon: BarChart3 },
+  { name: 'Social', href: '/social', icon: Users },
+  { name: 'Automation', href: '/automation', icon: Zap },
+  { name: 'Profile', href: '/profile', icon: User },
 ]
 
 export function Sidebar({

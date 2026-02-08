@@ -17,6 +17,7 @@ celery_app = Celery(
         "app.tasks.metadata",
         "app.tasks.recommendations",
         "app.tasks.downloads",
+        "app.tasks.ml_profiling",
     ],
 )
 
@@ -85,6 +86,16 @@ celery_app.conf.update(
         "check-download-status": {
             "task": "app.tasks.downloads.check_download_status",
             "schedule": crontab(minute="*/5"),
+        },
+        # Compute ML taste profiles weekly (after taste profile update)
+        "compute-ml-taste-profiles": {
+            "task": "app.tasks.ml_profiling.compute_ml_taste_profiles",
+            "schedule": crontab(minute=30, hour=4, day_of_week=0),  # Sunday 4:30 AM
+        },
+        # Track taste evolution monthly
+        "compute-taste-evolution": {
+            "task": "app.tasks.ml_profiling.compute_taste_evolution_task",
+            "schedule": crontab(minute=0, hour=5, day_of_month=1),  # 1st of month, 5 AM
         },
     },
 )

@@ -53,6 +53,37 @@ Vibarr is a comprehensive music discovery and management system that combines mu
 - **Download queue management**: Real-time progress monitoring, manual search & grab, retry failed downloads
 - **Wishlist-driven automation**: Items marked for auto-download are searched hourly with configurable confidence thresholds
 
+### ML-Based Taste Profiling
+- **Taste embeddings**: Weighted audio feature vectors computed from listening history with time-decay
+- **Taste clusters**: Automatic classification into profiles (Energetic Explorer, Chill Curator, Eclectic Audiophile, Rhythm Devotee, Melancholy Romantic, Instrumental Voyager, Indie Tastemaker, High Fidelity Purist)
+- **Taste evolution tracking**: Monthly snapshots track how your taste changes over time with drift rate and feature change analysis
+- **Taste tags**: Auto-generated descriptive tags (e.g., "High Energy", "Dance Floor Ready", "Genre Explorer", "90s Nostalgic")
+- **Predictive scoring**: ML-powered item scoring combining audio similarity (40%), genre matching (35%), novelty adjustment (15%), and data quality (10%)
+- **User compatibility**: Compute taste compatibility scores between users with per-feature similarity breakdown
+
+### Multi-User Support
+- **JWT authentication**: Secure user registration and login with bcrypt password hashing
+- **Household deployment**: Support for up to 10 users (configurable) with per-user data isolation
+- **User profiles**: Display names, avatars, bios, and privacy controls
+- **Admin system**: First registered user becomes admin automatically
+- **Privacy controls**: Per-user settings for public profile visibility, listening activity sharing, and library sharing
+
+### Social Features
+- **Follow system**: Follow other household members to see their activity
+- **Shared playlists**: Create and manage collaborative playlists with other users
+- **Activity feed**: See what followed users are listening to, adding, and discovering
+- **Global activity**: Public activity stream showing all user interactions
+- **Taste compatibility**: View compatibility scores between users based on ML taste embeddings
+
+### Advanced Automation Rules
+- **Rule engine**: Define custom automation rules with conditions and actions
+- **Triggers**: Rules fire on new releases, library syncs, recommendations, listening milestones, new artist discoveries, or schedules
+- **Conditions**: Filter by genre, artist, album type, release year, audio features, confidence scores, format, quality, and more
+- **Operators**: Equals, contains, greater/less than, in list, regex matching
+- **Actions**: Auto-add to wishlist, start downloads, add to playlists, send notifications, tag items, set quality profiles
+- **Rule testing**: Test rules against sample items before enabling
+- **Execution logging**: Track rule triggers, successes, and failures
+
 ### Mobile-Responsive UI
 - **Collapsible sidebar**: Full-width sidebar on desktop, slide-out drawer with overlay on mobile
 - **Responsive layouts**: All pages adapt from mobile to desktop with appropriate grid and spacing changes
@@ -65,6 +96,7 @@ Vibarr is a comprehensive music discovery and management system that combines mu
 - **Database**: PostgreSQL
 - **Cache/Queue**: Redis
 - **Task Queue**: Celery with Celery Beat
+- **Authentication**: JWT (python-jose) + bcrypt password hashing
 - **API Integrations**: Spotipy, pylast, musicbrainzngs, plexapi
 - **Download Client**: qBittorrent WebUI API
 - **Post-Processing**: beets (optional)
@@ -156,6 +188,13 @@ MAX_CONCURRENT_DOWNLOADS=3
 
 # Optional: MusicBrainz User Agent
 MUSICBRAINZ_USER_AGENT=Vibarr/1.0 (your@email.com)
+
+# Multi-User
+REGISTRATION_ENABLED=true
+MAX_USERS=10
+
+# ML Taste Profiling
+ML_PROFILING_ENABLED=true
 ```
 
 ### Getting API Keys
@@ -193,10 +232,10 @@ MUSICBRAINZ_USER_AGENT=Vibarr/1.0 (your@email.com)
 Vibarr/
 ├── backend/
 │   ├── app/
-│   │   ├── models/          # SQLAlchemy models (Artist, Album, Track, Download, QualityProfile, etc.)
-│   │   ├── routers/         # FastAPI route handlers (11 modules)
-│   │   ├── services/        # External API integrations + advanced recommendation engine
-│   │   ├── tasks/           # Celery background tasks (sync, metadata, recommendations, downloads)
+│   │   ├── models/          # SQLAlchemy models (Artist, Album, Track, User, Download, AutomationRule, etc.)
+│   │   ├── routers/         # FastAPI route handlers (14 modules)
+│   │   ├── services/        # External APIs, auth, ML profiler, automation engine
+│   │   ├── tasks/           # Celery background tasks (sync, metadata, recommendations, downloads, ML profiling)
 │   │   ├── config.py        # Application configuration
 │   │   ├── database.py      # Database setup
 │   │   ├── main.py          # FastAPI application
@@ -205,7 +244,7 @@ Vibarr/
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── app/             # Next.js app router pages (Home, Search, Explore, Library, Wishlist, Downloads, Stats, Settings)
+│   │   ├── app/             # Next.js app router pages (Home, Search, Explore, Library, Wishlist, Downloads, Stats, Settings, Profile, Social, Automation)
 │   │   ├── components/      # React components (discovery, layout, ui)
 │   │   └── lib/             # Utilities and API client
 │   ├── Dockerfile
@@ -277,6 +316,42 @@ Vibarr/
 - `GET /api/settings/beets/config` - Beets configuration status
 - `GET /api/settings/beets/library` - Browse beets library
 
+### Authentication
+- `POST /api/auth/register` - Register a new user (first user becomes admin)
+- `POST /api/auth/login` - Authenticate and get JWT access token
+- `GET /api/auth/me` - Get current user profile
+- `PATCH /api/auth/me` - Update current user profile
+- `GET /api/auth/users` - List all users with public profiles
+- `GET /api/auth/users/{user_id}` - Get a user's public profile with follower counts
+
+### Social
+- `POST /api/social/follow` - Follow another user
+- `DELETE /api/social/follow/{user_id}` - Unfollow a user
+- `GET /api/social/followers/{user_id}` - Get a user's followers
+- `GET /api/social/following/{user_id}` - Get users someone is following
+- `GET /api/social/compatibility/{user_id}` - Get taste compatibility with another user
+- `GET /api/social/playlists` - List shared playlists
+- `POST /api/social/playlists` - Create a shared playlist
+- `GET /api/social/playlists/{id}` - Get playlist details with items
+- `PATCH /api/social/playlists/{id}` - Update a playlist
+- `DELETE /api/social/playlists/{id}` - Delete a playlist
+- `POST /api/social/playlists/{id}/items` - Add item to playlist
+- `DELETE /api/social/playlists/{id}/items/{item_id}` - Remove item from playlist
+- `GET /api/social/activity` - Get activity feed from followed users
+- `GET /api/social/activity/global` - Get global public activity feed
+
+### Automation Rules
+- `GET /api/automation` - List automation rules
+- `POST /api/automation` - Create a new automation rule
+- `GET /api/automation/triggers` - List available triggers, operators, and action types
+- `GET /api/automation/{id}` - Get a specific rule
+- `PATCH /api/automation/{id}` - Update a rule
+- `DELETE /api/automation/{id}` - Delete a rule
+- `POST /api/automation/{id}/test` - Test a rule against a sample item
+- `POST /api/automation/{id}/toggle` - Toggle a rule's enabled state
+- `GET /api/automation/{id}/logs` - Get execution logs for a rule
+- `GET /api/automation/stats/summary` - Automation execution statistics
+
 ## Scheduled Tasks
 
 Vibarr runs several background tasks automatically:
@@ -290,6 +365,8 @@ Vibarr runs several background tasks automatically:
 | Update Taste Profile | Weekly (Sunday 4 AM) | Recalculates user preferences |
 | Sync Listening History | Every 2 hours | Pulls latest listening data from Plex |
 | Check Download Status | Every 5 minutes | Updates download progress from qBittorrent, triggers beets import on completion |
+| ML Taste Profiling | Weekly (Sunday 4:30 AM) | Computes taste embeddings, clusters, and tags for all users |
+| Taste Evolution Snapshot | Monthly (1st, 5 AM) | Records taste embedding snapshot for evolution tracking |
 
 ## Download Automation Pipeline
 
@@ -305,7 +382,9 @@ The download automation pipeline works end-to-end:
 
 ## Advanced Recommendation Engine
 
-The Phase 4 recommendation engine uses multiple scoring signals:
+The recommendation engine uses multiple scoring signals across two layers:
+
+### Phase 4: Multi-Signal Scoring
 
 1. **Time-Decay Weighting** - Recent listens are weighted exponentially higher (configurable half-life, default 14 days)
 2. **Artist Affinity Matrix** - Built from listening history with completion/skip adjustments
@@ -318,6 +397,24 @@ The Phase 4 recommendation engine uses multiple scoring signals:
    - Novelty adjustment (10%) - Balanced by your novelty preference
    - Feedback loop (10%) - Adjusted by your click/dismiss patterns
 5. **Diversity Boosting** - Caps per-artist (max 3) and per-category (max 15) recommendations
+
+### Phase 5: ML Taste Profiling
+
+1. **Taste Embeddings** - 8-dimensional vectors (danceability, energy, valence, acousticness, instrumentalness, liveness, speechiness, tempo) computed from time-decayed listening history with skip penalties
+2. **Cluster Classification** - Users are classified into one of 8 taste clusters using distance-based matching against predefined centroids
+3. **Predictive Scoring** - ML-powered item scoring combines audio similarity (40%), genre matching (35%), novelty preference (15%), and data quality (10%)
+4. **Taste Evolution** - Monthly snapshots track embedding drift over time, classifying taste trends as stable, evolving, or shifting
+5. **User Compatibility** - Per-feature similarity comparison between user embeddings for social taste matching
+
+## Automation Rules Engine
+
+The automation rules engine enables powerful, user-defined workflows:
+
+1. **Trigger-Condition-Action Model** - Rules fire on specific triggers (new releases, recommendations, milestones), evaluate conditions against item properties, and execute actions in sequence
+2. **Flexible Conditions** - Match on genre, artist, audio features, quality, popularity, format, and more with 9 operators (equals, contains, greater/less than, regex, etc.)
+3. **Composable Actions** - Chain multiple actions: add to wishlist, start downloads, add to playlists, send notifications, tag items, or skip
+4. **Rule Testing** - Test rules against sample items without executing to verify condition logic
+5. **Execution Logging** - Full audit trail of rule triggers, matched items, actions executed, and errors
 
 ## Development
 
@@ -365,18 +462,18 @@ npm run lint
 - [x] Quality/format preferences
 - [x] Download queue management
 
-### Phase 4: Polish (Current)
+### Phase 4: Polish
 - [x] Advanced recommendation engine (collaborative filtering, time-decay, diversity boosting)
 - [x] Stats & Insights dashboard with charts (area, bar, pie, radar, line)
 - [x] Mobile-responsive UI with collapsible sidebar
 - [x] Enhanced Discovery home with live stats
 - [x] Period-over-period comparison and listening streak tracking
 
-### Phase 5: Advanced
-- [ ] ML-based taste profiling
-- [ ] Social features
-- [ ] Advanced automation rules
-- [ ] Multi-user support
+### Phase 5: Advanced (Current)
+- [x] ML-based taste profiling (embeddings, clusters, evolution tracking, predictive scoring)
+- [x] Multi-user support (JWT auth, household deployment, privacy controls)
+- [x] Social features (follows, shared playlists, activity feed, taste compatibility)
+- [x] Advanced automation rules (trigger-condition-action engine with logging and testing)
 
 ## Contributing
 

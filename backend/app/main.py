@@ -11,6 +11,8 @@ from app.database import init_db
 from app.routers import (
     artists,
     albums,
+    auth,
+    automation,
     discovery,
     downloads,
     health,
@@ -18,6 +20,7 @@ from app.routers import (
     recommendations,
     search,
     settings,
+    social,
     stats,
     wishlist,
 )
@@ -53,6 +56,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(health.router, tags=["Health"])
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(search.router, prefix="/api/search", tags=["Search"])
 app.include_router(artists.router, prefix="/api/artists", tags=["Artists"])
 app.include_router(albums.router, prefix="/api/albums", tags=["Albums"])
@@ -63,6 +67,8 @@ app.include_router(wishlist.router, prefix="/api/wishlist", tags=["Wishlist"])
 app.include_router(downloads.router, prefix="/api/downloads", tags=["Downloads"])
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(stats.router, prefix="/api/stats", tags=["Statistics"])
+app.include_router(social.router, prefix="/api/social", tags=["Social"])
+app.include_router(automation.router, prefix="/api/automation", tags=["Automation"])
 
 
 @app.get("/")

@@ -72,6 +72,11 @@ services:
       MAX_CONCURRENT_DOWNLOADS: ${MAX_CONCURRENT_DOWNLOADS:-3}
       DOWNLOAD_PATH: ${DOWNLOAD_PATH:-/downloads}
       COMPLETED_DOWNLOAD_PATH: ${COMPLETED_DOWNLOAD_PATH:-/downloads/completed}
+      # Multi-user & ML settings
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
+      MAX_USERS: ${MAX_USERS:-10}
+      ML_PROFILING_ENABLED: ${ML_PROFILING_ENABLED:-true}
     volumes:
       - ./backend:/app
       - downloads:/downloads
