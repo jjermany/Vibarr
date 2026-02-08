@@ -10,6 +10,10 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 export const metadata: Metadata = {
   title: 'Vibarr - Music Discovery',
   description: 'Music Metadata Discovery & Recommendation Engine',
+  icons: {
+    icon: '/vibarr-icon.svg',
+    apple: '/vibarr-icon.svg',
+  },
 }
 
 export default function RootLayout({
