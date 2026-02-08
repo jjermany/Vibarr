@@ -16,6 +16,7 @@ from app.models.artist import Artist
 from app.models.album import Album
 from app.models.track import Track
 from app.models.recommendation import Recommendation
+from app.services.advanced_recommendations import calculate_listening_streak, calculate_library_growth
 
 logger = logging.getLogger(__name__)
 
@@ -591,3 +592,110 @@ async def get_decade_breakdown(
     ]
 
     return {"decades": decades}
+
+
+@router.get("/streak")
+async def get_listening_streak(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current and longest listening streaks."""
+    result = await db.execute(
+        select(ListeningHistory.played_at)
+        .order_by(ListeningHistory.played_at)
+    )
+    play_dates = [row[0] for row in result.all() if row[0]]
+    streak_data = calculate_listening_streak(play_dates)
+    return streak_data
+
+
+@router.get("/library-growth")
+async def get_library_growth(
+    days: int = Query(90, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get library growth over time (albums added per day)."""
+    result = await db.execute(
+        select(Album.created_at)
+        .where(Album.in_library == True)
+    )
+    items = [{"created_at": row[0]} for row in result.all() if row[0]]
+    growth = calculate_library_growth(items, days=days)
+    return {"growth": growth}
+
+
+@router.get("/comparison")
+async def get_period_comparison(
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compare current period stats with the previous period."""
+    now = datetime.utcnow()
+    current_start = now - timedelta(days=days)
+    previous_start = current_start - timedelta(days=days)
+
+    # Current period
+    current_plays_result = await db.execute(
+        select(func.count(ListeningHistory.id))
+        .where(ListeningHistory.played_at >= current_start)
+    )
+    current_plays = current_plays_result.scalar() or 0
+
+    current_time_result = await db.execute(
+        select(func.coalesce(func.sum(ListeningHistory.duration_ms), 0))
+        .where(ListeningHistory.played_at >= current_start)
+    )
+    current_time_ms = current_time_result.scalar() or 0
+
+    current_artists_result = await db.execute(
+        select(func.count(distinct(ListeningHistory.artist_id)))
+        .where(ListeningHistory.played_at >= current_start)
+        .where(ListeningHistory.artist_id.isnot(None))
+    )
+    current_artists = current_artists_result.scalar() or 0
+
+    # Previous period
+    previous_plays_result = await db.execute(
+        select(func.count(ListeningHistory.id))
+        .where(ListeningHistory.played_at >= previous_start)
+        .where(ListeningHistory.played_at < current_start)
+    )
+    previous_plays = previous_plays_result.scalar() or 0
+
+    previous_time_result = await db.execute(
+        select(func.coalesce(func.sum(ListeningHistory.duration_ms), 0))
+        .where(ListeningHistory.played_at >= previous_start)
+        .where(ListeningHistory.played_at < current_start)
+    )
+    previous_time_ms = previous_time_result.scalar() or 0
+
+    previous_artists_result = await db.execute(
+        select(func.count(distinct(ListeningHistory.artist_id)))
+        .where(ListeningHistory.played_at >= previous_start)
+        .where(ListeningHistory.played_at < current_start)
+        .where(ListeningHistory.artist_id.isnot(None))
+    )
+    previous_artists = previous_artists_result.scalar() or 0
+
+    def pct_change(current, previous):
+        if previous == 0:
+            return 100.0 if current > 0 else 0.0
+        return round((current - previous) / previous * 100, 1)
+
+    return {
+        "period_days": days,
+        "current": {
+            "plays": current_plays,
+            "time_hours": round(current_time_ms / (1000 * 60 * 60), 1),
+            "unique_artists": current_artists,
+        },
+        "previous": {
+            "plays": previous_plays,
+            "time_hours": round(previous_time_ms / (1000 * 60 * 60), 1),
+            "unique_artists": previous_artists,
+        },
+        "changes": {
+            "plays_pct": pct_change(current_plays, previous_plays),
+            "time_pct": pct_change(current_time_ms, previous_time_ms),
+            "artists_pct": pct_change(current_artists, previous_artists),
+        },
+    }

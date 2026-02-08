@@ -14,17 +14,34 @@ Vibarr is a comprehensive music discovery and management system that combines mu
 - **Similar artist discovery**: Leverages Last.fm's similar artist network
 - **Comprehensive release data**: Full discography tracking with release types, labels, and catalog numbers
 
-### Recommendation Engine
+### Advanced Recommendation Engine
+- **Collaborative filtering**: Artist affinity matrix built from listening history with time-decay weighting
+- **Multi-signal scoring**: Combines genre affinity, audio feature similarity, source artist affinity, novelty preference, and user feedback into a unified confidence score
+- **Diversity boosting**: Limits per-artist and per-category recommendations to ensure varied discovery
+- **Feedback loop**: Click, dismiss, and wishlist actions feed back into future recommendation scoring
 - **Discover Weekly**: Personalized weekly discovery playlists based on your taste
 - **Release Radar**: New releases from artists you follow
 - **Genre exploration**: Deep dives into genres based on your preferences
-- **Mood-based recommendations**: Music matching energy levels and moods
-- **Time machine**: Decade-based exploration
+- **Mood-based recommendations**: Music matching energy levels and moods (energetic, chill, focus)
+- **Deep cuts**: Lesser-known albums from artists already in your library
+- **History-based**: Recommendations driven by your most recent listening patterns
+
+### Stats & Insights Dashboard
+- **Listening overview**: Total plays, listening hours, unique artists/albums/tracks with period-over-period comparison
+- **Listening streak**: Current and longest streak tracking
+- **Listening activity chart**: Plays over time with area chart visualization
+- **Audio profile radar**: Radar chart showing your average danceability, energy, valence, acousticness, instrumentalness, and liveness
+- **Top artists & tracks**: Ranked lists with play counts and skip rates
+- **Genre distribution**: Pie chart breakdown of your top genres by listening weight
+- **Listening patterns**: Hourly and day-of-week bar charts showing when you listen most
+- **Decade breakdown**: Bar chart of plays by release decade
+- **Library growth**: Line chart tracking cumulative library size over time
+- **Discovery stats**: New artists/albums discovered, recommendation click rate, discovery rate percentage
 
 ### Library Management
 - **Plex integration**: Syncs with your Plex music library
 - **Listening history tracking**: Analyzes play counts, skip rates, and completion rates
-- **Taste profile building**: Learns your preferences over time
+- **Taste profile building**: Learns your preferences over time with exponential time-decay weighting
 - **Quality tracking**: Monitors formats, bitrates, and audio quality
 
 ### Download Automation
@@ -35,6 +52,11 @@ Vibarr is a comprehensive music discovery and management system that combines mu
 - **Beets integration**: Automatically imports, tags, and organizes completed downloads into your music library
 - **Download queue management**: Real-time progress monitoring, manual search & grab, retry failed downloads
 - **Wishlist-driven automation**: Items marked for auto-download are searched hourly with configurable confidence thresholds
+
+### Mobile-Responsive UI
+- **Collapsible sidebar**: Full-width sidebar on desktop, slide-out drawer with overlay on mobile
+- **Responsive layouts**: All pages adapt from mobile to desktop with appropriate grid and spacing changes
+- **Touch-friendly**: Larger tap targets and swipe-friendly horizontal scroll sections on mobile
 
 ## Tech Stack
 
@@ -51,7 +73,9 @@ Vibarr is a comprehensive music discovery and management system that combines mu
 - **Framework**: Next.js 14 (React 18)
 - **Styling**: TailwindCSS
 - **State Management**: TanStack Query + Zustand
+- **Charts**: Recharts (area, bar, pie, radar, line charts)
 - **UI Components**: Custom component library with Lucide icons
+- **Animations**: Framer Motion + CSS transitions
 
 ### Infrastructure
 - **Containerization**: Docker & Docker Compose
@@ -171,7 +195,7 @@ Vibarr/
 │   ├── app/
 │   │   ├── models/          # SQLAlchemy models (Artist, Album, Track, Download, QualityProfile, etc.)
 │   │   ├── routers/         # FastAPI route handlers (11 modules)
-│   │   ├── services/        # External API integrations (Plex, Spotify, Last.fm, Prowlarr, qBittorrent, Beets)
+│   │   ├── services/        # External API integrations + advanced recommendation engine
 │   │   ├── tasks/           # Celery background tasks (sync, metadata, recommendations, downloads)
 │   │   ├── config.py        # Application configuration
 │   │   ├── database.py      # Database setup
@@ -181,8 +205,8 @@ Vibarr/
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── app/             # Next.js app router pages (Home, Search, Explore, Library, Wishlist, Downloads, Settings)
-│   │   ├── components/      # React components
+│   │   ├── app/             # Next.js app router pages (Home, Search, Explore, Library, Wishlist, Downloads, Stats, Settings)
+│   │   ├── components/      # React components (discovery, layout, ui)
 │   │   └── lib/             # Utilities and API client
 │   ├── Dockerfile
 │   └── package.json
@@ -228,6 +252,21 @@ Vibarr/
 - `POST /api/downloads/{id}/pause` - Pause an active download
 - `POST /api/downloads/{id}/resume` - Resume a paused download
 
+### Statistics & Insights
+- `GET /api/stats/overview` - Listening statistics overview (plays, time, unique counts, top artists/albums/genres)
+- `GET /api/stats/top-artists` - Top artists by play count
+- `GET /api/stats/top-albums` - Top albums by play count
+- `GET /api/stats/top-tracks` - Top tracks by play count with skip rates
+- `GET /api/stats/top-genres` - Top genres weighted by play count
+- `GET /api/stats/listening-time` - Listening time grouped by hour/day/week/month
+- `GET /api/stats/listening-patterns` - Hourly and daily listening distribution with peak detection
+- `GET /api/stats/audio-features` - Average audio feature preferences from listening history
+- `GET /api/stats/discovery-stats` - New artists/albums discovered, recommendation engagement
+- `GET /api/stats/decade-breakdown` - Listening breakdown by release decade
+- `GET /api/stats/streak` - Current and longest listening streaks
+- `GET /api/stats/library-growth` - Library growth over time (cumulative album count)
+- `GET /api/stats/comparison` - Period-over-period comparison (plays, time, artists)
+
 ### Settings
 - `GET /api/settings/download` - Current download automation settings
 - `GET /api/settings/services` - Status of Prowlarr, qBittorrent, and Beets connections
@@ -245,7 +284,7 @@ Vibarr runs several background tasks automatically:
 | Task | Schedule | Description |
 |------|----------|-------------|
 | Plex Library Sync | Every 6 hours | Syncs library with Plex |
-| Generate Recommendations | Daily at 3 AM | Creates daily recommendation playlists |
+| Generate Recommendations | Daily at 3 AM | Creates daily recommendation playlists with advanced scoring |
 | Check New Releases | Every 6 hours | Monitors for new releases from library artists |
 | Process Wishlist | Every hour | Searches Prowlarr for wanted items and auto-downloads |
 | Update Taste Profile | Weekly (Sunday 4 AM) | Recalculates user preferences |
@@ -263,6 +302,22 @@ The download automation pipeline works end-to-end:
 5. **qBittorrent Grab** - Prowlarr sends the release to qBittorrent for downloading
 6. **Progress Monitoring** - Every 5 minutes, download progress is synced from qBittorrent
 7. **Beets Import** - When enabled, completed downloads are automatically imported, tagged, and organized into your music library
+
+## Advanced Recommendation Engine
+
+The Phase 4 recommendation engine uses multiple scoring signals:
+
+1. **Time-Decay Weighting** - Recent listens are weighted exponentially higher (configurable half-life, default 14 days)
+2. **Artist Affinity Matrix** - Built from listening history with completion/skip adjustments
+3. **Genre Affinity** - Weighted genre preferences derived from play patterns
+4. **Multi-Signal Scoring** - Each recommendation is scored across 6 dimensions:
+   - Genre affinity (25%) - How well the item's genres match your preferences
+   - Source artist affinity (20%) - How much you listen to the recommending artist
+   - External similarity (20%) - Last.fm/Spotify similarity scores
+   - Audio feature matching (15%) - Danceability, energy, valence similarity to your profile
+   - Novelty adjustment (10%) - Balanced by your novelty preference
+   - Feedback loop (10%) - Adjusted by your click/dismiss patterns
+5. **Diversity Boosting** - Caps per-artist (max 3) and per-category (max 15) recommendations
 
 ## Development
 
@@ -304,17 +359,18 @@ npm run lint
 - [x] New release monitoring
 - [x] Wishlist management
 
-### Phase 3: Automation (Current)
+### Phase 3: Automation
 - [x] Auto-download pipeline
 - [x] Beets integration
 - [x] Quality/format preferences
 - [x] Download queue management
 
-### Phase 4: Polish
-- [ ] Advanced recommendations
-- [ ] Beautiful UI overhaul
-- [ ] Stats and insights dashboard
-- [ ] Mobile-responsive design
+### Phase 4: Polish (Current)
+- [x] Advanced recommendation engine (collaborative filtering, time-decay, diversity boosting)
+- [x] Stats & Insights dashboard with charts (area, bar, pie, radar, line)
+- [x] Mobile-responsive UI with collapsible sidebar
+- [x] Enhanced Discovery home with live stats
+- [x] Period-over-period comparison and listening streak tracking
 
 ### Phase 5: Advanced
 - [ ] ML-based taste profiling
@@ -340,3 +396,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Prowlarr](https://prowlarr.com/) for indexer management
 - [qBittorrent](https://www.qbittorrent.org/) for torrent download management
 - [beets](https://beets.io/) for music library management and tagging
+- [Recharts](https://recharts.org/) for data visualization

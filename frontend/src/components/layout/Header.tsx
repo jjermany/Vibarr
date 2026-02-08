@@ -2,10 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, RefreshCw, Bell } from 'lucide-react'
+import { Search, RefreshCw, Bell, Menu } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export function Header() {
+export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [isSearchFocused, setIsSearchFocused] = useState(false)
   const router = useRouter()
@@ -18,7 +18,15 @@ export function Header() {
   }
 
   return (
-    <header className="h-16 bg-surface-900/80 backdrop-blur-sm border-b border-surface-800 flex items-center justify-between px-6">
+    <header className="h-16 bg-surface-900/80 backdrop-blur-sm border-b border-surface-800 flex items-center justify-between px-4 sm:px-6">
+      {/* Mobile menu button */}
+      <button
+        onClick={onMenuClick}
+        className="lg:hidden p-2 mr-2 rounded-lg text-surface-400 hover:text-white hover:bg-surface-800 transition-colors"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
+
       {/* Search */}
       <form onSubmit={handleSearch} className="flex-1 max-w-xl">
         <div
@@ -35,13 +43,13 @@ export function Header() {
             onFocus={() => setIsSearchFocused(true)}
             onBlur={() => setIsSearchFocused(false)}
             placeholder="Search artists, albums, tracks..."
-            className="w-full pl-10 pr-4 py-2.5 bg-surface-800 border border-surface-700 rounded-lg text-white placeholder-surface-400 focus:outline-none"
+            className="w-full pl-10 pr-4 py-2.5 bg-surface-800 border border-surface-700 rounded-lg text-white placeholder-surface-400 focus:outline-none text-sm sm:text-base"
           />
         </div>
       </form>
 
       {/* Actions */}
-      <div className="flex items-center gap-2 ml-4">
+      <div className="flex items-center gap-1 sm:gap-2 ml-2 sm:ml-4">
         <button
           className="btn-ghost p-2"
           title="Refresh library"

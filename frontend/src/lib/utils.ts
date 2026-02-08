@@ -57,3 +57,14 @@ export function getDecadeLabel(year: number): string {
 export function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
+
+export function getInitials(name: string): string {
+  if (!name) return '?'
+  return name
+    .split(' ')
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
+}

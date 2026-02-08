@@ -439,6 +439,11 @@ export const statsApi = {
     api.get('/api/stats/discovery-stats', { params: { days } }),
   decadeBreakdown: (days?: number) =>
     api.get('/api/stats/decade-breakdown', { params: { days } }),
+  streak: () => api.get('/api/stats/streak'),
+  libraryGrowth: (days?: number) =>
+    api.get('/api/stats/library-growth', { params: { days } }),
+  comparison: (days?: number) =>
+    api.get('/api/stats/comparison', { params: { days } }),
 }
 
 export default api
