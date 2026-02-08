@@ -9,6 +9,12 @@ from app.celery_app import celery_app
 from app.database import AsyncSessionLocal
 from app.services.spotify import spotify_service
 from app.services.lastfm import lastfm_service
+from app.services.advanced_recommendations import (
+    build_artist_affinity_matrix,
+    build_genre_affinity,
+    score_recommendation_advanced,
+    diversify_recommendations,
+)
 from app.models.artist import Artist
 from app.models.album import Album
 from app.models.track import Track
@@ -31,8 +37,8 @@ def generate_daily_recommendations():
 
 
 async def _generate_daily_recommendations_async():
-    """Async implementation of daily recommendations."""
-    logger.info("Generating daily recommendations")
+    """Async implementation of daily recommendations with advanced scoring."""
+    logger.info("Generating daily recommendations (Phase 4 advanced engine)")
 
     async with AsyncSessionLocal() as db:
         # Clear expired recommendations
@@ -49,8 +55,13 @@ async def _generate_daily_recommendations_async():
         # Get taste profile for scoring
         taste_profile = await _get_current_taste_profile(db)
 
+        # Build advanced affinity matrices from recent listening
+        artist_affinity, genre_aff = await _build_affinity_data(db)
+
         # Generate similar artist recommendations
-        similar_recs = await _generate_similar_artist_recommendations(db, taste_profile)
+        similar_recs = await _generate_similar_artist_recommendations(
+            db, taste_profile, artist_affinity=artist_affinity, genre_affinity=genre_aff,
+        )
         recommendations_created += len(similar_recs)
 
         # Generate genre-based recommendations
@@ -66,19 +77,36 @@ async def _generate_daily_recommendations_async():
         recommendations_created += len(mood_recs)
 
         # Generate listening-history-based recommendations
-        history_recs = await _generate_history_based_recommendations(db, taste_profile)
+        history_recs = await _generate_history_based_recommendations(
+            db, taste_profile, artist_affinity=artist_affinity, genre_affinity=genre_aff,
+        )
         recommendations_created += len(history_recs)
 
-        # Save all recommendations
-        all_recs = similar_recs + genre_recs + deep_cut_recs + mood_recs + history_recs
-        for rec in all_recs:
+        # Apply diversity boosting across all recommendations
+        all_rec_dicts = []
+        all_rec_objects = similar_recs + genre_recs + deep_cut_recs + mood_recs + history_recs
+        for rec in all_rec_objects:
+            all_rec_dicts.append({
+                "obj": rec,
+                "artist_id": rec.artist_id,
+                "based_on_artist_id": rec.based_on_artist_id,
+                "category": rec.category,
+                "confidence_score": rec.confidence_score,
+            })
+
+        diversified = diversify_recommendations(all_rec_dicts)
+        diversified_objects = [d["obj"] for d in diversified]
+
+        for rec in diversified_objects:
             db.add(rec)
 
         await db.commit()
+        recommendations_created = len(diversified_objects)
 
         return {
             "status": "completed",
             "recommendations_created": recommendations_created,
+            "pre_diversity_count": len(all_rec_objects),
             "breakdown": {
                 "similar_artists": len(similar_recs),
                 "genre_explore": len(genre_recs),
@@ -87,6 +115,53 @@ async def _generate_daily_recommendations_async():
                 "history_based": len(history_recs),
             },
         }
+
+
+async def _build_affinity_data(db) -> tuple:
+    """Build artist and genre affinity matrices from recent listening history."""
+    from sqlalchemy import select
+
+    since = datetime.utcnow() - timedelta(days=90)
+    result = await db.execute(
+        select(
+            ListeningHistory.artist_id,
+            ListeningHistory.played_at,
+            ListeningHistory.completion_percentage,
+            ListeningHistory.was_skipped,
+        )
+        .where(ListeningHistory.played_at >= since)
+        .where(ListeningHistory.artist_id.isnot(None))
+    )
+    rows = result.all()
+
+    history_dicts = [
+        {
+            "artist_id": row.artist_id,
+            "played_at": row.played_at,
+            "completion_percentage": row.completion_percentage,
+            "was_skipped": row.was_skipped,
+        }
+        for row in rows
+    ]
+
+    artist_affinity = build_artist_affinity_matrix(history_dicts)
+
+    # Get artist genres for genre affinity
+    artist_ids = list(set(r["artist_id"] for r in history_dicts if r["artist_id"]))
+    artist_genres_map = {}
+    if artist_ids:
+        artist_result = await db.execute(
+            select(Artist.id, Artist.genres)
+            .where(Artist.id.in_(artist_ids))
+            .where(Artist.genres.isnot(None))
+        )
+        for aid, genres in artist_result.all():
+            if genres:
+                artist_genres_map[aid] = genres
+
+    genre_aff = build_genre_affinity(history_dicts, artist_genres_map)
+
+    return artist_affinity, genre_aff
 
 
 async def _get_current_taste_profile(db) -> Dict[str, Any]:
@@ -182,9 +257,15 @@ def _score_recommendation(taste_profile: Dict, artist_genres: List[str] = None,
     return min(score, 1.0)
 
 
-async def _generate_similar_artist_recommendations(db, taste_profile: Dict) -> List[Recommendation]:
-    """Generate recommendations based on similar artists."""
+async def _generate_similar_artist_recommendations(
+    db, taste_profile: Dict,
+    artist_affinity: Dict[int, float] = None,
+    genre_affinity: Dict[str, float] = None,
+) -> List[Recommendation]:
+    """Generate recommendations based on similar artists with advanced scoring."""
     recommendations = []
+    artist_affinity = artist_affinity or {}
+    genre_affinity = genre_affinity or {}
 
     if not lastfm_service.is_available:
         return recommendations
@@ -197,6 +278,9 @@ async def _generate_similar_artist_recommendations(db, taste_profile: Dict) -> L
         .limit(20)
     )
     top_artists = result.scalars().all()
+
+    # Get feedback history for the similar_artists category
+    feedback = await _get_category_feedback(db, "similar_artists")
 
     for artist in top_artists:
         try:
@@ -221,11 +305,20 @@ async def _generate_similar_artist_recommendations(db, taste_profile: Dict) -> L
                 )
                 db_artist = artist_result.scalar_one_or_none()
 
-                # Calculate enhanced score
+                # Use advanced scoring
                 match_score = similar_artist.get("match", 0.5)
-                artist_genres = db_artist.genres if db_artist and db_artist.genres else []
-                taste_score = _score_recommendation(taste_profile, artist_genres=artist_genres)
-                confidence = (match_score * 0.6) + (taste_score * 0.4)
+                item_genres = db_artist.genres if db_artist and db_artist.genres else []
+
+                confidence, score_factors = score_recommendation_advanced(
+                    taste_profile=taste_profile,
+                    artist_affinity=artist_affinity,
+                    genre_affinity=genre_affinity,
+                    item_artist_id=db_artist.id if db_artist else None,
+                    item_genres=item_genres,
+                    based_on_artist_id=artist.id,
+                    similarity_score=match_score,
+                    feedback_history=feedback,
+                )
 
                 rec = Recommendation(
                     recommendation_type="artist",
@@ -234,13 +327,10 @@ async def _generate_similar_artist_recommendations(db, taste_profile: Dict) -> L
                     reason=f"Similar to {artist.name}",
                     reason_items=[f"Because you have {artist.name} in your library"],
                     based_on_artist_id=artist.id,
-                    confidence_score=round(confidence, 3),
+                    confidence_score=confidence,
                     relevance_score=round(match_score, 3),
-                    novelty_score=0.8,
-                    score_factors={
-                        "lastfm_match": round(match_score, 3),
-                        "taste_match": round(taste_score, 3),
-                    },
+                    novelty_score=score_factors.get("novelty", 0.8),
+                    score_factors=score_factors,
                     expires_at=datetime.utcnow() + timedelta(days=7),
                 )
                 recommendations.append(rec)
@@ -479,9 +569,15 @@ async def _generate_mood_recommendations(db, taste_profile: Dict) -> List[Recomm
     return recommendations
 
 
-async def _generate_history_based_recommendations(db, taste_profile: Dict) -> List[Recommendation]:
-    """Generate recommendations based on recent listening patterns."""
+async def _generate_history_based_recommendations(
+    db, taste_profile: Dict,
+    artist_affinity: Dict[int, float] = None,
+    genre_affinity: Dict[str, float] = None,
+) -> List[Recommendation]:
+    """Generate recommendations based on recent listening patterns with advanced scoring."""
     recommendations = []
+    artist_affinity = artist_affinity or {}
+    genre_affinity = genre_affinity or {}
 
     from sqlalchemy import select, func
 
@@ -502,6 +598,8 @@ async def _generate_history_based_recommendations(db, taste_profile: Dict) -> Li
 
     if not top_recent:
         return recommendations
+
+    feedback = await _get_category_feedback(db, "similar_artists")
 
     for artist_id, play_count in top_recent:
         artist_result = await db.execute(
@@ -537,10 +635,17 @@ async def _generate_history_based_recommendations(db, taste_profile: Dict) -> Li
                     db_artist = db_result.scalar_one_or_none()
 
                     related_genres = related_artist.get("genres", [])
-                    confidence = _score_recommendation(
-                        taste_profile, artist_genres=related_genres
+                    confidence, score_factors = score_recommendation_advanced(
+                        taste_profile=taste_profile,
+                        artist_affinity=artist_affinity,
+                        genre_affinity=genre_affinity,
+                        item_artist_id=db_artist.id if db_artist else None,
+                        item_genres=related_genres,
+                        based_on_artist_id=artist.id,
+                        similarity_score=0.7,
+                        feedback_history=feedback,
                     )
-                    # Boost based on recent listening
+                    # Boost based on recency of listening
                     confidence = min(confidence + 0.1, 1.0)
 
                     rec = Recommendation(
@@ -555,11 +660,8 @@ async def _generate_history_based_recommendations(db, taste_profile: Dict) -> Li
                         based_on_artist_id=artist.id,
                         confidence_score=round(confidence, 3),
                         relevance_score=0.8,
-                        novelty_score=0.75,
-                        score_factors={
-                            "recent_plays": play_count,
-                            "taste_match": round(confidence, 3),
-                        },
+                        novelty_score=score_factors.get("novelty", 0.75),
+                        score_factors=score_factors,
                         expires_at=datetime.utcnow() + timedelta(days=7),
                     )
                     recommendations.append(rec)
@@ -861,6 +963,33 @@ async def _update_taste_profile_async():
             "novelty_preference": round(novelty_preference, 3),
             "audio_features": avg_features,
         }
+
+
+async def _get_category_feedback(db, category: str) -> Dict:
+    """Get aggregated feedback history for a recommendation category."""
+    from sqlalchemy import select, func
+
+    clicks_result = await db.execute(
+        select(func.count(Recommendation.id))
+        .where(Recommendation.category == category)
+        .where(Recommendation.clicked == True)
+    )
+    dismissals_result = await db.execute(
+        select(func.count(Recommendation.id))
+        .where(Recommendation.category == category)
+        .where(Recommendation.dismissed == True)
+    )
+    wishlisted_result = await db.execute(
+        select(func.count(Recommendation.id))
+        .where(Recommendation.category == category)
+        .where(Recommendation.added_to_wishlist == True)
+    )
+
+    return {
+        "clicks": clicks_result.scalar() or 0,
+        "dismissals": dismissals_result.scalar() or 0,
+        "wishlisted": wishlisted_result.scalar() or 0,
+    }
 
 
 @celery_app.task(name="app.tasks.recommendations.generate_discover_weekly")
