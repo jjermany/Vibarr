@@ -245,24 +245,28 @@ function ServicesTab() {
     if (data?.data) {
       const s = data.data
       setForm({
-        plex_url: s.plex_url,
-        plex_token: s.plex_token,
-        spotify_client_id: s.spotify_client_id,
-        spotify_client_secret: s.spotify_client_secret,
-        lastfm_api_key: s.lastfm_api_key,
-        lastfm_shared_secret: s.lastfm_shared_secret,
-        prowlarr_url: s.prowlarr_url,
-        prowlarr_api_key: s.prowlarr_api_key,
-        qbittorrent_url: s.qbittorrent_url,
-        qbittorrent_username: s.qbittorrent_username,
-        qbittorrent_password: s.qbittorrent_password,
-        qbittorrent_category: s.qbittorrent_category,
-        beets_enabled: String(s.beets_enabled),
-        beets_config_path: s.beets_config_path,
-        beets_library_path: s.beets_library_path,
-        beets_auto_import: String(s.beets_auto_import),
-        beets_move_files: String(s.beets_move_files),
-        musicbrainz_user_agent: s.musicbrainz_user_agent,
+        plex_url: s.plex_url ?? '',
+        plex_token: s.plex_token ?? '',
+        spotify_client_id: s.spotify_client_id ?? '',
+        spotify_client_secret: s.spotify_client_secret ?? '',
+        lastfm_api_key: s.lastfm_api_key ?? '',
+        lastfm_shared_secret: s.lastfm_shared_secret ?? '',
+        prowlarr_url: s.prowlarr_url ?? '',
+        prowlarr_api_key: s.prowlarr_api_key ?? '',
+        qbittorrent_url: s.qbittorrent_url ?? '',
+        qbittorrent_username: s.qbittorrent_username ?? 'admin',
+        qbittorrent_password: s.qbittorrent_password ?? '',
+        qbittorrent_category: s.qbittorrent_category ?? 'vibarr',
+        qbittorrent_categories: s.qbittorrent_categories ?? 'vibarr,music',
+        qbittorrent_incomplete_path: s.qbittorrent_incomplete_path ?? '',
+        qbittorrent_completed_path: s.qbittorrent_completed_path ?? '',
+        qbittorrent_remove_completed: String(s.qbittorrent_remove_completed ?? false),
+        beets_enabled: String(s.beets_enabled ?? false),
+        beets_config_path: s.beets_config_path ?? '/config/beets/config.yaml',
+        beets_library_path: s.beets_library_path ?? '/music',
+        beets_auto_import: String(s.beets_auto_import ?? true),
+        beets_move_files: String(s.beets_move_files ?? true),
+        musicbrainz_user_agent: s.musicbrainz_user_agent ?? 'Vibarr/1.0',
       })
     }
   }, [data])
@@ -380,7 +384,68 @@ function ServicesTab() {
           <FieldInput label="URL" value={form.qbittorrent_url || ''} onChange={(v) => set('qbittorrent_url', v)} placeholder="http://localhost:8080" />
           <FieldInput label="Username" value={form.qbittorrent_username || ''} onChange={(v) => set('qbittorrent_username', v)} placeholder="admin" />
           <FieldInput label="Password" value={form.qbittorrent_password || ''} onChange={(v) => set('qbittorrent_password', v)} secret />
-          <FieldInput label="Category" value={form.qbittorrent_category || ''} onChange={(v) => set('qbittorrent_category', v)} placeholder="vibarr" />
+          <FieldInput label="Default Category" value={form.qbittorrent_category || ''} onChange={(v) => set('qbittorrent_category', v)} placeholder="vibarr" description="Primary category assigned to new downloads" />
+        </div>
+
+        <div className="border-t border-surface-700 pt-4">
+          <h4 className="text-sm font-medium text-white mb-3">Categories</h4>
+          <p className="text-xs text-surface-400 mb-3">
+            Comma-separated list of categories to create in qBittorrent (e.g. vibarr, music, audiobooks).
+            These are synced to qBittorrent when you save.
+          </p>
+          <FieldInput
+            label="Categories"
+            value={form.qbittorrent_categories || ''}
+            onChange={(v) => set('qbittorrent_categories', v)}
+            placeholder="vibarr,music"
+          />
+          {form.qbittorrent_categories && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {form.qbittorrent_categories.split(',').map((cat) => cat.trim()).filter(Boolean).map((cat) => (
+                <span
+                  key={cat}
+                  className={cn(
+                    'text-xs px-2 py-1 rounded-full',
+                    cat === (form.qbittorrent_category || 'vibarr')
+                      ? 'bg-primary-500/20 text-primary-400'
+                      : 'bg-surface-700 text-surface-300'
+                  )}
+                >
+                  {cat}{cat === (form.qbittorrent_category || 'vibarr') ? ' (default)' : ''}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-surface-700 pt-4">
+          <h4 className="text-sm font-medium text-white mb-3">Download Paths</h4>
+          <p className="text-xs text-surface-400 mb-3">
+            qBittorrent downloads to the incomplete path (your cache drive), then moves files
+            to the completed path when done. Vibarr will import from the completed path.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FieldInput
+              label="Incomplete Path"
+              description="Where active downloads are stored (e.g. your cache drive)"
+              value={form.qbittorrent_incomplete_path || ''}
+              onChange={(v) => set('qbittorrent_incomplete_path', v)}
+              placeholder="/mnt/cache/downloads/incomplete"
+            />
+            <FieldInput
+              label="Completed Path"
+              description="Where finished downloads are moved before import"
+              value={form.qbittorrent_completed_path || ''}
+              onChange={(v) => set('qbittorrent_completed_path', v)}
+              placeholder="/mnt/user/downloads/completed"
+            />
+          </div>
+          <FieldToggle
+            label="Remove From Client After Import"
+            description="Remove the torrent from qBittorrent after successful import (like Sonarr/Radarr)"
+            checked={form.qbittorrent_remove_completed === 'true'}
+            onChange={(v) => set('qbittorrent_remove_completed', String(v))}
+          />
         </div>
       </div>
 
@@ -677,18 +742,34 @@ function AutomationTab() {
     onError: () => toast.error('Failed to save settings'),
   })
 
+  const importMutation = useMutation({
+    mutationFn: () => settingsApi.importCompleted(),
+    onSuccess: (res) => {
+      const d = res.data as any
+      if (d.import_triggered > 0) {
+        toast.success(`Triggered import for ${d.import_triggered} download(s)`)
+      } else {
+        toast.success(`Scan complete. ${d.scanned} entries found, nothing to import.`)
+      }
+      if (d.orphaned_entries?.length > 0) {
+        toast(`${d.orphaned_entries.length} unmatched folder(s) in completed path`, { icon: '\u2139\ufe0f' })
+      }
+    },
+    onError: () => toast.error('Failed to scan completed downloads'),
+  })
+
   const [form, setForm] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (data?.data) {
       const s = data.data
       setForm({
-        auto_download_enabled: String(s.auto_download_enabled),
-        auto_download_confidence_threshold: String(s.auto_download_confidence_threshold),
-        preferred_quality: s.preferred_quality,
-        max_concurrent_downloads: String(s.max_concurrent_downloads),
-        download_path: s.download_path,
-        completed_download_path: s.completed_download_path,
+        auto_download_enabled: String(s.auto_download_enabled ?? false),
+        auto_download_confidence_threshold: String(s.auto_download_confidence_threshold ?? 0.8),
+        preferred_quality: s.preferred_quality ?? 'flac',
+        max_concurrent_downloads: String(s.max_concurrent_downloads ?? 3),
+        download_path: s.download_path ?? '/downloads',
+        completed_download_path: s.completed_download_path ?? '/downloads/completed',
       })
     }
   }, [data])
@@ -805,17 +886,17 @@ function AutomationTab() {
             {
               step: '3',
               title: 'Grab & Download',
-              desc: 'The best matching release is sent to qBittorrent for downloading.',
+              desc: 'The best matching release is sent to qBittorrent. Downloads go to the incomplete path (cache drive).',
             },
             {
               step: '4',
               title: 'Status Monitoring',
-              desc: 'Every 5 minutes, download progress is checked and updated.',
+              desc: 'Every 5 minutes, download progress is checked. When complete, qBittorrent moves files from incomplete to completed path.',
             },
             {
               step: '5',
-              title: 'Import (optional)',
-              desc: 'When beets is enabled, completed downloads are automatically imported, tagged, and organized.',
+              title: 'Import',
+              desc: 'Completed downloads are imported from the completed path, tagged with beets (if enabled), and organized into your library \u2014 just like Sonarr/Radarr.',
             },
           ].map((item) => (
             <div
@@ -834,6 +915,30 @@ function AutomationTab() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Manual Import */}
+      <div className="card p-6">
+        <h3 className="text-lg font-semibold text-white mb-2">
+          Manual Import
+        </h3>
+        <p className="text-sm text-surface-400 mb-4">
+          Scan the completed download path for finished downloads and trigger
+          import for any that haven't been processed yet. This works like the
+          manual import in Sonarr/Radarr.
+        </p>
+        <button
+          onClick={() => importMutation.mutate()}
+          disabled={importMutation.isPending}
+          className="btn-secondary flex items-center gap-2"
+        >
+          {importMutation.isPending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <HardDrive className="w-4 h-4" />
+          )}
+          Scan &amp; Import Completed Downloads
+        </button>
       </div>
     </div>
   )

@@ -54,6 +54,10 @@ DEFAULT_APP_SETTINGS = [
     {"key": "qbittorrent_username", "value": "admin", "category": "qbittorrent"},
     {"key": "qbittorrent_password", "value": "", "category": "qbittorrent"},
     {"key": "qbittorrent_category", "value": "vibarr", "category": "qbittorrent"},
+    {"key": "qbittorrent_categories", "value": "vibarr,music", "category": "qbittorrent"},
+    {"key": "qbittorrent_incomplete_path", "value": "", "category": "qbittorrent"},
+    {"key": "qbittorrent_completed_path", "value": "", "category": "qbittorrent"},
+    {"key": "qbittorrent_remove_completed", "value": "false", "category": "qbittorrent"},
     # Beets
     {"key": "beets_enabled", "value": "false", "category": "beets"},
     {"key": "beets_config_path", "value": "/config/beets/config.yaml", "category": "beets"},

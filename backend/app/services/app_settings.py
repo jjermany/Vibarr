@@ -31,15 +31,25 @@ async def _load_cache(db: AsyncSession) -> None:
 
 
 async def seed_defaults(db: AsyncSession) -> None:
-    """Seed default settings if the table is empty."""
-    result = await db.execute(select(AppSettings).limit(1))
-    if result.scalar_one_or_none() is not None:
-        return  # Already seeded
+    """Seed default settings, adding any missing keys.
 
+    On first run this populates all defaults. On subsequent runs it
+    fills in any newly-added keys so the settings page never encounters
+    missing values after an upgrade.
+    """
+    # Fetch all existing keys in one query
+    result = await db.execute(select(AppSettings.key))
+    existing_keys = {row[0] for row in result.all()}
+
+    added = 0
     for item in DEFAULT_APP_SETTINGS:
-        db.add(AppSettings(**item))
-    await db.commit()
-    logger.info("Seeded default application settings")
+        if item["key"] not in existing_keys:
+            db.add(AppSettings(**item))
+            added += 1
+
+    if added:
+        await db.commit()
+        logger.info("Seeded %d new default application setting(s)", added)
 
 
 async def ensure_cache(db: Optional[AsyncSession] = None) -> None:

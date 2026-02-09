@@ -30,34 +30,38 @@ class DownloadSettingsResponse(BaseModel):
     completed_download_path: str
 
 class GeneralSettingsResponse(BaseModel):
-    spotify_client_id: str
-    spotify_client_secret: str
-    lastfm_api_key: str
-    lastfm_shared_secret: str
-    plex_url: str
-    plex_token: str
-    prowlarr_url: str
-    prowlarr_api_key: str
-    qbittorrent_url: str
-    qbittorrent_username: str
-    qbittorrent_password: str
-    qbittorrent_category: str
-    beets_enabled: bool
-    beets_config_path: str
-    beets_library_path: str
-    beets_auto_import: bool
-    beets_move_files: bool
-    auto_download_enabled: bool
-    auto_download_confidence_threshold: float
-    preferred_quality: str
-    max_concurrent_downloads: int
-    download_path: str
-    completed_download_path: str
-    musicbrainz_user_agent: str
-    registration_enabled: bool
-    max_users: int
-    ml_profiling_enabled: bool
-    taste_embedding_half_life_days: float
+    spotify_client_id: str = ""
+    spotify_client_secret: str = ""
+    lastfm_api_key: str = ""
+    lastfm_shared_secret: str = ""
+    plex_url: str = ""
+    plex_token: str = ""
+    prowlarr_url: str = ""
+    prowlarr_api_key: str = ""
+    qbittorrent_url: str = ""
+    qbittorrent_username: str = "admin"
+    qbittorrent_password: str = ""
+    qbittorrent_category: str = "vibarr"
+    qbittorrent_categories: str = "vibarr,music"
+    qbittorrent_incomplete_path: str = ""
+    qbittorrent_completed_path: str = ""
+    qbittorrent_remove_completed: bool = False
+    beets_enabled: bool = False
+    beets_config_path: str = "/config/beets/config.yaml"
+    beets_library_path: str = "/music"
+    beets_auto_import: bool = True
+    beets_move_files: bool = True
+    auto_download_enabled: bool = False
+    auto_download_confidence_threshold: float = 0.8
+    preferred_quality: str = "flac"
+    max_concurrent_downloads: int = 3
+    download_path: str = "/downloads"
+    completed_download_path: str = "/downloads/completed"
+    musicbrainz_user_agent: str = "Vibarr/1.0"
+    registration_enabled: bool = True
+    max_users: int = 10
+    ml_profiling_enabled: bool = True
+    taste_embedding_half_life_days: float = 21.0
 
 class SettingsUpdateRequest(BaseModel):
     settings: Dict[str, str]
@@ -127,6 +131,10 @@ async def get_all_settings(db: AsyncSession = Depends(get_db)):
         qbittorrent_username=cfg.get_setting("qbittorrent_username", "admin"),
         qbittorrent_password=cfg.get_setting("qbittorrent_password"),
         qbittorrent_category=cfg.get_setting("qbittorrent_category", "vibarr"),
+        qbittorrent_categories=cfg.get_setting("qbittorrent_categories", "vibarr,music"),
+        qbittorrent_incomplete_path=cfg.get_setting("qbittorrent_incomplete_path"),
+        qbittorrent_completed_path=cfg.get_setting("qbittorrent_completed_path"),
+        qbittorrent_remove_completed=cfg.get_bool("qbittorrent_remove_completed"),
         beets_enabled=cfg.get_bool("beets_enabled"),
         beets_config_path=cfg.get_setting("beets_config_path", "/config/beets/config.yaml"),
         beets_library_path=cfg.get_setting("beets_library_path", "/music"),
@@ -208,6 +216,13 @@ async def get_service_status(db: AsyncSession = Depends(get_db)):
             "connected": qbit_connected,
             "url": cfg.get_setting("qbittorrent_url"),
             "category": cfg.get_setting("qbittorrent_category", "vibarr"),
+            "categories": [
+                c.strip()
+                for c in cfg.get_setting("qbittorrent_categories", "vibarr,music").split(",")
+                if c.strip()
+            ],
+            "incomplete_path": cfg.get_setting("qbittorrent_incomplete_path"),
+            "completed_path": cfg.get_setting("qbittorrent_completed_path"),
             "version": qbit_version,
         },
         beets=beets_info,
@@ -242,6 +257,126 @@ async def test_service_connection(
         return info
 
     raise HTTPException(status_code=400, detail=f"Unknown service: {service}")
+
+
+# --- qBittorrent Categories ---
+
+@router.get("/qbittorrent/categories")
+async def get_qbittorrent_categories(db: AsyncSession = Depends(get_db)):
+    """Get the configured qBittorrent categories."""
+    await cfg.ensure_cache(db)
+    raw = cfg.get_setting("qbittorrent_categories", "vibarr,music")
+    categories = [c.strip() for c in raw.split(",") if c.strip()]
+    default_cat = cfg.get_setting("qbittorrent_category", "vibarr")
+    return {
+        "categories": categories,
+        "default_category": default_cat,
+    }
+
+
+@router.put("/qbittorrent/categories")
+async def update_qbittorrent_categories(
+    body: Dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update qBittorrent categories and optionally sync them to qBit."""
+    categories = body.get("categories", [])
+    if isinstance(categories, list):
+        cat_str = ",".join(c.strip() for c in categories if c.strip())
+    else:
+        cat_str = str(categories)
+
+    await cfg.update_setting(db, "qbittorrent_categories", cat_str)
+
+    # Optionally set default category
+    default_cat = body.get("default_category")
+    if default_cat:
+        await cfg.update_setting(db, "qbittorrent_category", default_cat)
+
+    # Sync categories to qBittorrent if connected
+    synced = []
+    if download_client_service.is_configured:
+        for cat in cat_str.split(","):
+            cat = cat.strip()
+            if cat:
+                ok = await download_client_service.ensure_category_by_name(
+                    cat, cfg.get_setting("download_path", "/downloads")
+                )
+                if ok:
+                    synced.append(cat)
+
+    return {
+        "status": "ok",
+        "categories": [c.strip() for c in cat_str.split(",") if c.strip()],
+        "synced_to_qbittorrent": synced,
+    }
+
+
+# --- Completed Download Import ---
+
+@router.post("/downloads/import-completed")
+async def import_completed_downloads(db: AsyncSession = Depends(get_db)):
+    """Scan the completed download path and trigger import for any
+    finished downloads that haven't been imported yet (Arr-style)."""
+    await cfg.ensure_cache(db)
+
+    completed_path = cfg.get_setting("qbittorrent_completed_path") or cfg.get_setting(
+        "completed_download_path", "/downloads/completed"
+    )
+
+    if not completed_path:
+        raise HTTPException(status_code=400, detail="No completed download path configured")
+
+    from pathlib import Path
+    import os
+
+    target = Path(completed_path)
+    if not target.exists():
+        return {"status": "ok", "message": "Completed path does not exist yet", "scanned": 0, "imported": 0}
+
+    # Find subdirectories (each is typically one download)
+    entries = [
+        entry for entry in target.iterdir()
+        if entry.is_dir() or (entry.is_file() and entry.suffix.lower() in (
+            ".flac", ".mp3", ".ogg", ".opus", ".m4a", ".wav", ".aac",
+        ))
+    ]
+
+    # Cross-reference with existing downloads to find un-imported ones
+    from app.models.download import Download, DownloadStatus
+
+    result = await db.execute(
+        select(Download).where(
+            Download.status == DownloadStatus.COMPLETED,
+            Download.beets_imported == False,
+        )
+    )
+    unimported = result.scalars().all()
+
+    triggered = 0
+    for download in unimported:
+        # Check if the download path matches something in the completed folder
+        dl_path = download.download_path or ""
+        if dl_path and Path(dl_path).exists():
+            from app.tasks.downloads import import_completed_download as import_task
+            import_task.delay(download_id=download.id)
+            triggered += 1
+
+    # Also detect orphaned directories (files in completed that have no Download record)
+    orphaned = []
+    known_paths = {d.download_path for d in unimported if d.download_path}
+    for entry in entries:
+        entry_str = str(entry)
+        if entry_str not in known_paths and not any(entry_str in kp for kp in known_paths):
+            orphaned.append(str(entry.name))
+
+    return {
+        "status": "ok",
+        "completed_path": completed_path,
+        "scanned": len(entries),
+        "import_triggered": triggered,
+        "orphaned_entries": orphaned,
+    }
 
 
 # --- Quality Profiles ---
