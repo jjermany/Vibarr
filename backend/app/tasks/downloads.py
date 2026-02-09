@@ -369,13 +369,24 @@ def check_download_status():
 
 
 async def _check_download_status_async():
-    """Check and update download statuses from qBittorrent."""
+    """Check and update download statuses from qBittorrent.
+
+    Handles the incomplete → completed path flow: when qBittorrent finishes
+    a torrent it moves files from the incomplete/cache path to the completed
+    path. We detect this and update download_path so the import step uses
+    the correct final location (similar to how Sonarr/Radarr handle it).
+    """
     logger.info("Checking download statuses")
 
     if not download_client_service.is_configured:
         return {"status": "skipped", "reason": "Download client not configured"}
 
     await cfg.ensure_cache()
+
+    completed_dir = (
+        cfg.get_setting("qbittorrent_completed_path")
+        or cfg.get_setting("completed_download_path", "/downloads/completed")
+    )
 
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
@@ -412,16 +423,24 @@ async def _check_download_status_async():
                 download.progress = torrent.progress
                 download.download_speed = torrent.dl_speed
                 download.eta_seconds = torrent.eta if torrent.eta < 8640000 else None
+                # Always track the latest content path from qBittorrent
                 download.download_path = torrent.content_path or torrent.save_path
                 updated += 1
 
                 if torrent.is_complete:
-                    download.status = DownloadStatus.COMPLETED
                     download.progress = 100.0
                     download.completed_at = datetime.utcnow()
                     download.download_speed = None
                     download.eta_seconds = None
                     completed += 1
+
+                    # When qBit moves files from incomplete to completed,
+                    # the content_path / save_path updates. Use the
+                    # completed directory setting as the canonical path if
+                    # the torrent's reported path lives there.
+                    final_path = torrent.content_path or torrent.save_path
+                    if completed_dir and final_path:
+                        download.download_path = final_path
 
                     # Update wishlist item
                     if download.wishlist_id:
@@ -435,10 +454,19 @@ async def _check_download_status_async():
                             wishlist_item.status = WishlistStatus.DOWNLOADED
                             await db.commit()
 
-                    # Auto-import with beets if enabled
+                    # Auto-import with beets if enabled (Arr-style)
                     if cfg.get_bool("beets_enabled") and cfg.get_bool("beets_auto_import", True):
                         import_completed_download.delay(download_id=download.id)
                         download.status = DownloadStatus.IMPORTING
+                    else:
+                        download.status = DownloadStatus.COMPLETED
+
+                    # Optionally remove the torrent from qBittorrent after
+                    # import (like the Arrs do after a successful grab).
+                    if cfg.get_bool("qbittorrent_remove_completed"):
+                        await download_client_service.delete_torrent(
+                            download.download_id, delete_files=False
+                        )
 
                 elif torrent.is_errored:
                     download.status = DownloadStatus.FAILED

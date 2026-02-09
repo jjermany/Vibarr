@@ -157,7 +157,12 @@ class DownloadClientService:
         save_path: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> bool:
-        """Add a torrent by URL (magnet link or .torrent URL)."""
+        """Add a torrent by URL (magnet link or .torrent URL).
+
+        If ``qbittorrent_incomplete_path`` is configured the torrent is
+        saved there initially; qBittorrent will move it to the category's
+        save-path (or ``download_path``) once complete.
+        """
         client = await self._get_client()
         if not client:
             return False
@@ -166,11 +171,20 @@ class DownloadClientService:
             data: Dict[str, Any] = {"urls": url}
 
             qbit_cat = cfg.get_setting("qbittorrent_category", "vibarr")
-            dl_path = cfg.get_setting("download_path", "/downloads")
             if category or qbit_cat:
                 data["category"] = category or qbit_cat
-            if save_path or dl_path:
-                data["savepath"] = save_path or dl_path
+
+            # Use incomplete path for active downloads when configured;
+            # qBittorrent moves finished torrents to the category save-path.
+            incomplete = cfg.get_setting("qbittorrent_incomplete_path")
+            dl_path = cfg.get_setting("download_path", "/downloads")
+            if save_path:
+                data["savepath"] = save_path
+            elif incomplete:
+                data["savepath"] = incomplete
+            elif dl_path:
+                data["savepath"] = dl_path
+
             if tags:
                 data["tags"] = ",".join(tags)
 
@@ -288,23 +302,74 @@ class DownloadClientService:
         return len(torrents)
 
     async def ensure_category(self) -> bool:
-        """Ensure our download category exists in qBittorrent."""
+        """Ensure our default download category exists in qBittorrent."""
+        cat = cfg.get_setting("qbittorrent_category", "vibarr")
+        save_path = cfg.get_setting("download_path", "/downloads")
+        return await self.ensure_category_by_name(cat, save_path)
+
+    async def ensure_category_by_name(
+        self, category: str, save_path: str = ""
+    ) -> bool:
+        """Create a category in qBittorrent if it doesn't already exist."""
+        client = await self._get_client()
+        if not client:
+            return False
+
+        try:
+            data: Dict[str, Any] = {"category": category}
+            if save_path:
+                data["savePath"] = save_path
+            response = await client.post(
+                "/api/v2/torrents/createCategory", data=data
+            )
+            # 409 means category already exists, which is fine
+            return response.status_code in (200, 409)
+        except Exception as e:
+            logger.error(f"Failed to create category '{category}': {e}")
+            return False
+
+    async def ensure_all_categories(self) -> List[str]:
+        """Ensure all user-configured categories exist in qBittorrent."""
+        raw = cfg.get_setting("qbittorrent_categories", "vibarr,music")
+        categories = [c.strip() for c in raw.split(",") if c.strip()]
+        save_path = cfg.get_setting("download_path", "/downloads")
+
+        created = []
+        for cat in categories:
+            if await self.ensure_category_by_name(cat, save_path):
+                created.append(cat)
+        return created
+
+    async def get_categories(self) -> Dict[str, Any]:
+        """Get all categories from qBittorrent."""
+        client = await self._get_client()
+        if not client:
+            return {}
+
+        try:
+            response = await client.get("/api/v2/torrents/categories")
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to get categories: {e}")
+        return {}
+
+    async def set_torrent_category(
+        self, torrent_hash: str, category: str
+    ) -> bool:
+        """Set category on an existing torrent."""
         client = await self._get_client()
         if not client:
             return False
 
         try:
             response = await client.post(
-                "/api/v2/torrents/createCategory",
-                data={
-                    "category": cfg.get_setting("qbittorrent_category", "vibarr"),
-                    "savePath": cfg.get_setting("download_path", "/downloads"),
-                },
+                "/api/v2/torrents/setCategory",
+                data={"hashes": torrent_hash, "category": category},
             )
-            # 409 means category already exists, which is fine
-            return response.status_code in (200, 409)
+            return response.status_code == 200
         except Exception as e:
-            logger.error(f"Failed to create category: {e}")
+            logger.error(f"Failed to set category: {e}")
             return False
 
 

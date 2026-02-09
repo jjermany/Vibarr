@@ -224,7 +224,16 @@ export interface QualityProfile {
 
 export interface ServiceStatus {
   prowlarr: { configured: boolean; connected: boolean }
-  qbittorrent: { configured: boolean; connected: boolean; url?: string; category?: string; version?: string }
+  qbittorrent: {
+    configured: boolean
+    connected: boolean
+    url?: string
+    category?: string
+    categories?: string[]
+    incomplete_path?: string
+    completed_path?: string
+    version?: string
+  }
   beets: { available: boolean; version?: string; reason?: string }
 }
 
@@ -250,6 +259,10 @@ export interface GeneralSettings {
   qbittorrent_username: string
   qbittorrent_password: string
   qbittorrent_category: string
+  qbittorrent_categories: string
+  qbittorrent_incomplete_path: string
+  qbittorrent_completed_path: string
+  qbittorrent_remove_completed: boolean
   beets_enabled: boolean
   beets_config_path: string
   beets_library_path: string
@@ -580,6 +593,10 @@ export const settingsApi = {
   getBeetsLibrary: (query?: string) =>
     api.get('/api/settings/beets/library', { params: { query } }),
   generateBeetsConfig: () => api.post('/api/settings/beets/generate-config'),
+  getQbitCategories: () => api.get('/api/settings/qbittorrent/categories'),
+  updateQbitCategories: (data: { categories: string[]; default_category?: string }) =>
+    api.put('/api/settings/qbittorrent/categories', data),
+  importCompleted: () => api.post('/api/settings/downloads/import-completed'),
 }
 
 export const statsApi = {
