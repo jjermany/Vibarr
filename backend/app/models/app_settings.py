@@ -61,9 +61,10 @@ DEFAULT_APP_SETTINGS = [
     # Beets
     {"key": "beets_enabled", "value": "false", "category": "beets"},
     {"key": "beets_config_path", "value": "/config/beets/config.yaml", "category": "beets"},
-    {"key": "beets_library_path", "value": "/music", "category": "beets"},
+    {"key": "beets_library_path", "value": "/media/music", "category": "beets"},
     {"key": "beets_auto_import", "value": "true", "category": "beets"},
     {"key": "beets_move_files", "value": "true", "category": "beets"},
+    {"key": "beets_hardlink", "value": "true", "category": "beets"},
     # Recommendation settings
     {"key": "recommendation_refresh_hours", "value": "24", "category": "general"},
     {"key": "new_release_check_hours", "value": "6", "category": "general"},

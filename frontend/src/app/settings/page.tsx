@@ -263,9 +263,10 @@ function ServicesTab() {
         qbittorrent_remove_completed: String(s.qbittorrent_remove_completed ?? false),
         beets_enabled: String(s.beets_enabled ?? false),
         beets_config_path: s.beets_config_path ?? '/config/beets/config.yaml',
-        beets_library_path: s.beets_library_path ?? '/music',
+        beets_library_path: s.beets_library_path ?? '/media/music',
         beets_auto_import: String(s.beets_auto_import ?? true),
         beets_move_files: String(s.beets_move_files ?? true),
+        beets_hardlink: String(s.beets_hardlink ?? true),
         musicbrainz_user_agent: s.musicbrainz_user_agent ?? 'Vibarr/1.0',
       })
     }
@@ -477,10 +478,24 @@ function ServicesTab() {
         <FieldToggle label="Enable Beets" description="Automatically tag and organize completed downloads" checked={form.beets_enabled === 'true'} onChange={(v) => set('beets_enabled', String(v))} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FieldInput label="Config Path" value={form.beets_config_path || ''} onChange={(v) => set('beets_config_path', v)} placeholder="/config/beets/config.yaml" />
-          <FieldInput label="Library Path" value={form.beets_library_path || ''} onChange={(v) => set('beets_library_path', v)} placeholder="/music" />
+          <FieldInput
+            label="Library Path"
+            description="Must be under the same /media mount as completed downloads for hardlinks to work"
+            value={form.beets_library_path || ''}
+            onChange={(v) => set('beets_library_path', v)}
+            placeholder="/media/music"
+          />
         </div>
         <FieldToggle label="Auto Import" description="Automatically import completed downloads" checked={form.beets_auto_import === 'true'} onChange={(v) => set('beets_auto_import', String(v))} />
-        <FieldToggle label="Move Files" description="Move files instead of copying after import" checked={form.beets_move_files === 'true'} onChange={(v) => set('beets_move_files', String(v))} />
+        <FieldToggle
+          label="Use Hardlinks"
+          description="Hardlink files instead of moving/copying. Requires library and completed paths on the same filesystem (both under /media). Lets torrents keep seeding without extra disk usage."
+          checked={form.beets_hardlink === 'true'}
+          onChange={(v) => set('beets_hardlink', String(v))}
+        />
+        {form.beets_hardlink !== 'true' && (
+          <FieldToggle label="Move Files" description="Move files instead of copying after import (ignored when hardlinks are enabled)" checked={form.beets_move_files === 'true'} onChange={(v) => set('beets_move_files', String(v))} />
+        )}
       </div>
 
       {/* MusicBrainz */}

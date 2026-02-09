@@ -48,9 +48,10 @@ class GeneralSettingsResponse(BaseModel):
     qbittorrent_remove_completed: bool = False
     beets_enabled: bool = False
     beets_config_path: str = "/config/beets/config.yaml"
-    beets_library_path: str = "/music"
+    beets_library_path: str = "/media/music"
     beets_auto_import: bool = True
     beets_move_files: bool = True
+    beets_hardlink: bool = True
     auto_download_enabled: bool = False
     auto_download_confidence_threshold: float = 0.8
     preferred_quality: str = "flac"
@@ -137,9 +138,10 @@ async def get_all_settings(db: AsyncSession = Depends(get_db)):
         qbittorrent_remove_completed=cfg.get_bool("qbittorrent_remove_completed"),
         beets_enabled=cfg.get_bool("beets_enabled"),
         beets_config_path=cfg.get_setting("beets_config_path", "/config/beets/config.yaml"),
-        beets_library_path=cfg.get_setting("beets_library_path", "/music"),
+        beets_library_path=cfg.get_setting("beets_library_path", "/media/music"),
         beets_auto_import=cfg.get_bool("beets_auto_import", True),
         beets_move_files=cfg.get_bool("beets_move_files", True),
+        beets_hardlink=cfg.get_bool("beets_hardlink", True),
         auto_download_enabled=cfg.get_bool("auto_download_enabled"),
         auto_download_confidence_threshold=cfg.get_float("auto_download_confidence_threshold", 0.8),
         preferred_quality=cfg.get_setting("preferred_quality", "flac"),
@@ -503,7 +505,7 @@ async def get_beets_config(db: AsyncSession = Depends(get_db)):
     return {
         "enabled": cfg.get_bool("beets_enabled"),
         "config_path": cfg.get_setting("beets_config_path", "/config/beets/config.yaml"),
-        "library_path": cfg.get_setting("beets_library_path", "/music"),
+        "library_path": cfg.get_setting("beets_library_path", "/media/music"),
         "auto_import": cfg.get_bool("beets_auto_import", True),
         "move_files": cfg.get_bool("beets_move_files", True),
         **info,
