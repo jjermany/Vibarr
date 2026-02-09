@@ -268,6 +268,7 @@ export interface GeneralSettings {
   beets_library_path: string
   beets_auto_import: boolean
   beets_move_files: boolean
+  beets_hardlink: boolean
   auto_download_enabled: boolean
   auto_download_confidence_threshold: number
   preferred_quality: string

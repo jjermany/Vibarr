@@ -58,7 +58,7 @@ class BeetsService:
         return cfg.get_setting("beets_config_path", "/config/beets/config.yaml")
 
     def _get_library_path(self) -> str:
-        return cfg.get_setting("beets_library_path", "/music")
+        return cfg.get_setting("beets_library_path", "/media/music")
 
     async def test_connection(self) -> Dict[str, Any]:
         """Test that beets is properly configured."""
@@ -88,6 +88,16 @@ class BeetsService:
         except Exception as e:
             return {"available": False, "reason": str(e)}
 
+    def _can_hardlink(self, source_path: str) -> bool:
+        """Check if source and library are on the same filesystem."""
+        try:
+            library_path = cfg.get_setting("beets_library_path", "/media/music")
+            src_dev = os.stat(source_path).st_dev
+            dst_dev = os.stat(library_path).st_dev
+            return src_dev == dst_dev
+        except OSError:
+            return False
+
     async def import_directory(
         self,
         source_path: str,
@@ -99,6 +109,11 @@ class BeetsService:
         Import a directory of music files using beets.
 
         Uses beet import in quiet/auto mode so no interactive prompts are needed.
+
+        When hardlinks are enabled and source/dest are on the same filesystem
+        (e.g. both under /media), beets will hardlink files so the torrent
+        can continue seeding from the original location without extra disk
+        usage -- just like Sonarr/Radarr.
         """
         if not self.is_available:
             return BeetsImportResult(
@@ -115,6 +130,10 @@ class BeetsService:
                 error=f"Source path does not exist: {source_path}",
             )
 
+        use_hardlink = (
+            cfg.get_bool("beets_hardlink", True)
+            and self._can_hardlink(source_path)
+        )
         should_move = move if move is not None else cfg.get_bool("beets_move_files", True)
 
         cmd = [
@@ -122,10 +141,13 @@ class BeetsService:
             "-c", self._get_config_path(),
             "import",
             "--quiet",  # Non-interactive, skip ambiguous
-            "-l", cfg.get_setting("beets_library_path", "/music"),
+            "-l", cfg.get_setting("beets_library_path", "/media/music"),
         ]
 
-        if should_move:
+        if use_hardlink:
+            cmd.append("--link")
+            logger.info("Using hardlinks (source and library on same filesystem)")
+        elif should_move:
             cmd.append("--move")
         else:
             cmd.append("--copy")
@@ -161,7 +183,7 @@ class BeetsService:
                 return BeetsImportResult(
                     success=True,
                     source_path=source_path,
-                    final_path=final_path or cfg.get_setting("beets_library_path", "/music"),
+                    final_path=final_path or cfg.get_setting("beets_library_path", "/media/music"),
                     albums_imported=albums,
                     tracks_imported=tracks,
                     output=output,
@@ -247,12 +269,26 @@ class BeetsService:
         return max(albums, 1) if tracks > 0 else albums, tracks
 
     def generate_default_config(self) -> str:
-        """Generate a default beets config.yaml."""
-        return f"""directory: {cfg.get_setting("beets_library_path", "/music")}
+        """Generate a default beets config.yaml.
+
+        When hardlinks are enabled the import mode is set to ``link`` so
+        that completed downloads and the organised library share the same
+        inodes.  This lets torrents continue seeding from /media/completed
+        while the music is also available under /media/music.
+        """
+        use_hardlink = cfg.get_bool("beets_hardlink", True)
+        if use_hardlink:
+            import_mode = "link: yes"
+        elif cfg.get_bool("beets_move_files", True):
+            import_mode = "move: yes"
+        else:
+            import_mode = "copy: yes"
+
+        return f"""directory: {cfg.get_setting("beets_library_path", "/media/music")}
 library: /config/beets/library.db
 
 import:
-    move: {'yes' if cfg.get_bool("beets_move_files", True) else 'no'}
+    {import_mode}
     write: yes
     quiet_fallback: skip
     timid: no

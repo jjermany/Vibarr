@@ -54,16 +54,26 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Create non-root user for app processes and set up directories
+# /media is the single parent for completed downloads AND the music
+# library so that hardlinks work (both paths on the same mount).
+#   /media/completed  – where qBit moves finished torrents
+#   /media/music      – final organised library after beets import
+# /incomplete lives on the cache drive (separate filesystem, no
+# hardlinks needed – files are moved by qBit on completion).
+# /music is a symlink to /media/music for backwards compatibility
+# with beets configs and Plex that already reference /music.
 RUN useradd -m -u 1000 vibarr \
-    && mkdir -p /config /downloads /music /var/log/supervisor /var/run/postgresql \
-    && chown -R vibarr:vibarr /app \
+    && mkdir -p /config /downloads /incomplete /media/completed /media/music /var/log/supervisor /var/run/postgresql \
+    && ln -sfn /media/music /music \
+    && chown -R vibarr:vibarr /app /incomplete /media \
     && chown postgres:postgres /var/run/postgresql
 
 LABEL net.unraid.docker.icon="https://github.com/jjermany/Vibarr/raw/main/Logo%20and%20Icon/vibarr-icon.svg"
 
 VOLUME /config
 VOLUME /downloads
-VOLUME /music
+VOLUME /incomplete
+VOLUME /media
 
 EXPOSE 3000
 
