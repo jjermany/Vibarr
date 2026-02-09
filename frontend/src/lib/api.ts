@@ -37,6 +37,7 @@ export interface Album {
   id: number
   title: string
   artist_id: number
+  artist_name?: string
   album_type?: string
   release_type?: string
   spotify_id?: string
