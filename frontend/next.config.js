@@ -2,6 +2,31 @@
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
+  async rewrites() {
+    const backendUrl = process.env.INTERNAL_API_URL || 'http://localhost:8000'
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${backendUrl}/api/:path*`,
+      },
+      {
+        source: '/health',
+        destination: `${backendUrl}/health`,
+      },
+      {
+        source: '/health/:path*',
+        destination: `${backendUrl}/health/:path*`,
+      },
+      {
+        source: '/docs',
+        destination: `${backendUrl}/docs`,
+      },
+      {
+        source: '/openapi.json',
+        destination: `${backendUrl}/openapi.json`,
+      },
+    ]
+  },
   images: {
     remotePatterns: [
       {
