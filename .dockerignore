@@ -1,0 +1,31 @@
+# Git
+.git
+.gitignore
+
+# Node
+frontend/node_modules
+frontend/.next
+frontend/.env*
+
+# Python
+backend/__pycache__
+backend/.pytest_cache
+backend/.mypy_cache
+backend/.env*
+backend/*.pyc
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docker
+docker-compose.yml
+docker-compose*.yml
+
+# Docs / Misc
+README.md
+LICENSE
+Logo and Icon
+*.md
