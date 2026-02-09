@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { Status } from '@/lib/status'
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
@@ -119,7 +120,7 @@ export interface WishlistItem {
   album_id?: number
   artist_name?: string
   album_title?: string
-  status: string
+  status: Status
   priority: string
   source: string
   confidence_score?: number

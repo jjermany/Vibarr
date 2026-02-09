@@ -1,0 +1,11 @@
+export type Status =
+  | 'wanted'
+  | 'searching'
+  | 'found'
+  | 'downloading'
+  | 'downloaded'
+  | 'completed'
+  | 'failed'
+  | 'pending'
+  | 'queued'
+  | 'importing'
