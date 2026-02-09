@@ -1,6 +1,7 @@
 'use client'
 
 import { cn } from '@/lib/utils'
+import type { Status } from '@/lib/status'
 import {
   Clock,
   Search,
@@ -10,18 +11,6 @@ import {
   XCircle,
   Loader2,
 } from 'lucide-react'
-
-type Status =
-  | 'wanted'
-  | 'searching'
-  | 'found'
-  | 'downloading'
-  | 'downloaded'
-  | 'completed'
-  | 'failed'
-  | 'pending'
-  | 'queued'
-  | 'importing'
 
 interface StatusBadgeProps {
   status: Status
