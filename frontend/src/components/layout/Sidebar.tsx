@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import Image from 'next/image'
 import {
   Home,
   Search,
@@ -11,7 +12,6 @@ import {
   Download,
   BarChart3,
   Settings,
-  Music2,
   X,
   Users,
   Zap,
@@ -61,9 +61,13 @@ export function Sidebar({
         {/* Logo */}
         <div className="p-6 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3" onClick={onMobileClose}>
-            <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-accent-500 rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/20">
-              <Music2 className="w-6 h-6 text-white" />
-            </div>
+            <Image
+              src="/vibarr-icon.svg"
+              alt="Vibarr"
+              width={40}
+              height={40}
+              className="rounded-xl shadow-lg shadow-primary-500/20"
+            />
             <span className="text-xl font-bold text-white tracking-tight">Vibarr</span>
           </Link>
           <button

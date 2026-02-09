@@ -1,5 +1,7 @@
 FROM node:20-alpine
 
+LABEL net.unraid.docker.icon="/vibarr-icon.svg"
+
 WORKDIR /app
 
 # Install dependencies

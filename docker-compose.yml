@@ -163,6 +163,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: vibarr-frontend
+    labels:
+      net.unraid.docker.icon: "/vibarr-icon.svg"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
     volumes:
