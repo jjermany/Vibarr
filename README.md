@@ -145,6 +145,28 @@ docker-compose up -d
 - Backend API: http://localhost:8000
 - API Documentation: http://localhost:8000/docs
 
+### Unraid Installation
+
+1. Download the Unraid template to your templates directory:
+```bash
+# From your Unraid terminal
+wget -O /boot/config/plugins/dockerMan/templates-user/vibarr.xml \
+  https://raw.githubusercontent.com/jjermany/Vibarr/main/unraid-template/vibarr.xml
+```
+
+2. In the Unraid web UI, go to **Docker** > **Add Container** > **Template** and select **Vibarr** from the dropdown.
+
+3. Configure the required paths:
+   - **Config**: `/mnt/user/appdata/vibarr` (default)
+   - **Downloads**: Path to your download staging directory
+   - **Music Library**: Path to your music library (same path used in Plex/beets)
+
+4. Click **Apply** to create the container.
+
+5. Access Vibarr at `http://your-unraid-ip:3000` and configure your services (Plex, Prowlarr, qBittorrent, etc.) via the Settings page.
+
+> **Note**: The Vibarr container is a single all-in-one image that includes PostgreSQL, Redis, and the application. No external database setup is required.
+
 ## Configuration
 
 ### Environment Variables
