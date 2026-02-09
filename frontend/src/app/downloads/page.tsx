@@ -227,6 +227,7 @@ export default function DownloadsPage() {
           onAddToQueue={() => addMutation.mutate()}
           isSearching={searchMutation.isPending}
           isGrabbing={grabMutation.isPending}
+          hasSearched={searchMutation.isSuccess}
           results={searchResults}
         />
       )}
@@ -456,6 +457,7 @@ function SearchTab({
   onAddToQueue,
   isSearching,
   isGrabbing,
+  hasSearched,
   results,
 }: {
   artist: string
@@ -469,6 +471,7 @@ function SearchTab({
   onAddToQueue: () => void
   isSearching: boolean
   isGrabbing: boolean
+  hasSearched: boolean
   results: ReleaseSearchResult[]
 }) {
   return (
@@ -597,7 +600,7 @@ function SearchTab({
         </div>
       )}
 
-      {searchMutation.isSuccess && results.length === 0 && (
+      {hasSearched && results.length === 0 && (
         <EmptyState
           icon={<Search className="w-8 h-8" />}
           title="No results found"
