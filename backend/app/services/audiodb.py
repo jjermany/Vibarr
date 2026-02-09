@@ -5,10 +5,9 @@ import logging
 
 import httpx
 
-from app.config import get_settings
+from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 AUDIODB_BASE_URL = "https://www.theaudiodb.com/api/v1/json"
 
@@ -25,7 +24,7 @@ class AudioDBService:
         """Get HTTP client."""
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=f"{AUDIODB_BASE_URL}/{settings.audiodb_api_key}",
+                base_url=f"{AUDIODB_BASE_URL}/{cfg.get_setting('audiodb_api_key', '2')}",
                 timeout=30.0,
             )
         return self._client

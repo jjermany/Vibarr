@@ -1,13 +1,23 @@
-"""Application configuration settings."""
+"""Application configuration settings.
+
+Infrastructure settings (database, redis, celery) are loaded from environment
+variables. All other user-configurable settings are stored in the database and
+managed through the UI.
+"""
 
 from functools import lru_cache
-from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Infrastructure settings loaded from environment variables.
+
+    Only settings required to bootstrap the application are kept here.
+    All user-configurable settings (API keys, service URLs, download
+    preferences, etc.) live in the database ``app_settings`` table and
+    are managed via the Settings page in the UI.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -15,7 +25,7 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Application
+    # Application identity
     app_name: str = "Vibarr"
     app_version: str = "0.5.0"
     debug: bool = False
@@ -30,62 +40,6 @@ class Settings(BaseSettings):
     # Celery
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/1"
-
-    # Spotify API
-    spotify_client_id: Optional[str] = None
-    spotify_client_secret: Optional[str] = None
-
-    # Last.fm API
-    lastfm_api_key: Optional[str] = None
-    lastfm_shared_secret: Optional[str] = None
-
-    # Plex
-    plex_url: Optional[str] = None
-    plex_token: Optional[str] = None
-
-    # Prowlarr
-    prowlarr_url: Optional[str] = None
-    prowlarr_api_key: Optional[str] = None
-
-    # MusicBrainz
-    musicbrainz_user_agent: str = "Vibarr/1.0 (https://github.com/jjermany/Vibarr)"
-
-    # TheAudioDB (free tier)
-    audiodb_api_key: str = "2"  # Free tier key
-
-    # Recommendation settings
-    recommendation_refresh_hours: int = 24
-    new_release_check_hours: int = 6
-    max_recommendations_per_request: int = 50
-
-    # Download settings
-    auto_download_enabled: bool = False
-    auto_download_confidence_threshold: float = 0.8
-    preferred_quality: str = "flac"  # flac, 320, v0
-    max_concurrent_downloads: int = 3
-    download_path: str = "/downloads"
-    completed_download_path: str = "/downloads/completed"
-
-    # qBittorrent
-    qbittorrent_url: Optional[str] = None
-    qbittorrent_username: str = "admin"
-    qbittorrent_password: str = ""
-    qbittorrent_category: str = "vibarr"
-
-    # Beets
-    beets_enabled: bool = False
-    beets_config_path: str = "/config/beets/config.yaml"
-    beets_library_path: str = "/music"
-    beets_auto_import: bool = True
-    beets_move_files: bool = True  # Move vs copy after import
-
-    # Multi-user settings
-    registration_enabled: bool = True
-    max_users: int = 10  # Maximum users for household deployment
-
-    # ML Taste Profiling
-    ml_profiling_enabled: bool = True
-    taste_embedding_half_life_days: float = 21.0
 
     @property
     def async_database_url(self) -> str:

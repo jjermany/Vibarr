@@ -5,10 +5,9 @@ import logging
 
 import pylast
 
-from app.config import get_settings
+from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class LastFMService:
@@ -21,11 +20,12 @@ class LastFMService:
     @property
     def network(self) -> Optional[pylast.LastFMNetwork]:
         """Get or create Last.fm network."""
-        if self._network is None and settings.lastfm_api_key:
+        api_key = cfg.get_optional("lastfm_api_key")
+        if self._network is None and api_key:
             try:
                 self._network = pylast.LastFMNetwork(
-                    api_key=settings.lastfm_api_key,
-                    api_secret=settings.lastfm_shared_secret,
+                    api_key=api_key,
+                    api_secret=cfg.get_setting("lastfm_shared_secret"),
                 )
             except Exception as e:
                 logger.error(f"Failed to initialize Last.fm network: {e}")

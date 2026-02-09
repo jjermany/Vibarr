@@ -5,10 +5,9 @@ import logging
 
 import httpx
 
-from app.config import get_settings
+from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class ProwlarrService:
@@ -21,10 +20,12 @@ class ProwlarrService:
     @property
     def client(self) -> Optional[httpx.AsyncClient]:
         """Get HTTP client."""
-        if self._client is None and settings.prowlarr_url and settings.prowlarr_api_key:
+        url = cfg.get_optional("prowlarr_url")
+        api_key = cfg.get_optional("prowlarr_api_key")
+        if self._client is None and url and api_key:
             self._client = httpx.AsyncClient(
-                base_url=settings.prowlarr_url.rstrip("/"),
-                headers={"X-Api-Key": settings.prowlarr_api_key},
+                base_url=url.rstrip("/"),
+                headers={"X-Api-Key": api_key},
                 timeout=30.0,
             )
         return self._client
@@ -32,7 +33,7 @@ class ProwlarrService:
     @property
     def is_available(self) -> bool:
         """Check if Prowlarr service is available."""
-        return settings.prowlarr_url is not None and settings.prowlarr_api_key is not None
+        return bool(cfg.get_optional("prowlarr_url") and cfg.get_optional("prowlarr_api_key"))
 
     async def test_connection(self) -> bool:
         """Test connection to Prowlarr."""

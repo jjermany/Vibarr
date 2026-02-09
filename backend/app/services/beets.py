@@ -7,10 +7,9 @@ import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
-from app.config import get_settings
+from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class BeetsImportResult:
@@ -51,19 +50,19 @@ class BeetsService:
     @property
     def is_available(self) -> bool:
         """Check if beets is configured and available."""
-        if not settings.beets_enabled:
+        if not cfg.get_bool("beets_enabled"):
             return False
         return shutil.which("beet") is not None
 
     def _get_config_path(self) -> str:
-        return settings.beets_config_path
+        return cfg.get_setting("beets_config_path", "/config/beets/config.yaml")
 
     def _get_library_path(self) -> str:
-        return settings.beets_library_path
+        return cfg.get_setting("beets_library_path", "/music")
 
     async def test_connection(self) -> Dict[str, Any]:
         """Test that beets is properly configured."""
-        if not settings.beets_enabled:
+        if not cfg.get_bool("beets_enabled"):
             return {"available": False, "reason": "Beets not enabled in settings"}
 
         beet_path = shutil.which("beet")
@@ -116,14 +115,14 @@ class BeetsService:
                 error=f"Source path does not exist: {source_path}",
             )
 
-        should_move = move if move is not None else settings.beets_move_files
+        should_move = move if move is not None else cfg.get_bool("beets_move_files", True)
 
         cmd = [
             "beet",
             "-c", self._get_config_path(),
             "import",
             "--quiet",  # Non-interactive, skip ambiguous
-            "-l", settings.beets_library_path,
+            "-l", cfg.get_setting("beets_library_path", "/music"),
         ]
 
         if should_move:
@@ -162,7 +161,7 @@ class BeetsService:
                 return BeetsImportResult(
                     success=True,
                     source_path=source_path,
-                    final_path=final_path or settings.beets_library_path,
+                    final_path=final_path or cfg.get_setting("beets_library_path", "/music"),
                     albums_imported=albums,
                     tracks_imported=tracks,
                     output=output,
@@ -249,11 +248,11 @@ class BeetsService:
 
     def generate_default_config(self) -> str:
         """Generate a default beets config.yaml."""
-        return f"""directory: {settings.beets_library_path}
+        return f"""directory: {cfg.get_setting("beets_library_path", "/music")}
 library: /config/beets/library.db
 
 import:
-    move: {'yes' if settings.beets_move_files else 'no'}
+    move: {'yes' if cfg.get_bool("beets_move_files", True) else 'no'}
     write: yes
     quiet_fallback: skip
     timid: no

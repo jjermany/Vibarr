@@ -8,6 +8,7 @@ from app.database import AsyncSessionLocal
 from app.services.prowlarr import prowlarr_service
 from app.services.download_client import download_client_service
 from app.services.beets import beets_service
+from app.services import app_settings as cfg
 from app.models.wishlist import WishlistItem, WishlistStatus
 from app.models.download import Download, DownloadStatus
 
@@ -37,8 +38,7 @@ async def _process_wishlist_async():
     if not prowlarr_service.is_available:
         return {"status": "skipped", "reason": "Prowlarr not available"}
 
-    from app.config import get_settings
-    settings = get_settings()
+    await cfg.ensure_cache()
 
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
@@ -75,7 +75,7 @@ async def _process_wishlist_async():
                 results = await prowlarr_service.search_album(
                     artist=artist_name,
                     album=album_title,
-                    preferred_format=item.preferred_format or settings.preferred_quality,
+                    preferred_format=item.preferred_format or cfg.get_setting("preferred_quality", "flac"),
                 )
                 searched += 1
 
@@ -109,16 +109,16 @@ async def _process_wishlist_async():
 
                     # Auto-grab if score meets threshold
                     if (
-                        settings.auto_download_enabled
+                        cfg.get_bool("auto_download_enabled")
                         and best_result.get("score", 0)
-                        >= settings.auto_download_confidence_threshold * 100
+                        >= cfg.get_float("auto_download_confidence_threshold", 0.8) * 100
                     ):
                         # Check concurrent download limit
                         active_count = 0
                         if download_client_service.is_configured:
                             active_count = await download_client_service.get_active_count()
 
-                        if active_count < settings.max_concurrent_downloads:
+                        if active_count < cfg.get_int("max_concurrent_downloads", 3):
                             grab_release.delay(
                                 download_id=download.id,
                                 guid=best_result.get("guid"),
@@ -128,7 +128,7 @@ async def _process_wishlist_async():
                         else:
                             logger.info(
                                 f"Skipping auto-grab for '{album_title}': "
-                                f"concurrent limit reached ({active_count}/{settings.max_concurrent_downloads})"
+                                f"concurrent limit reached ({active_count}/{cfg.get_int('max_concurrent_downloads', 3)})"
                             )
                 else:
                     item.status = WishlistStatus.WANTED
@@ -375,8 +375,7 @@ async def _check_download_status_async():
     if not download_client_service.is_configured:
         return {"status": "skipped", "reason": "Download client not configured"}
 
-    from app.config import get_settings
-    settings = get_settings()
+    await cfg.ensure_cache()
 
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
@@ -437,7 +436,7 @@ async def _check_download_status_async():
                             await db.commit()
 
                     # Auto-import with beets if enabled
-                    if settings.beets_enabled and settings.beets_auto_import:
+                    if cfg.get_bool("beets_enabled") and cfg.get_bool("beets_auto_import", True):
                         import_completed_download.delay(download_id=download.id)
                         download.status = DownloadStatus.IMPORTING
 

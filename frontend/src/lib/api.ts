@@ -237,6 +237,37 @@ export interface DownloadSettings {
   completed_download_path: string
 }
 
+export interface GeneralSettings {
+  spotify_client_id: string
+  spotify_client_secret: string
+  lastfm_api_key: string
+  lastfm_shared_secret: string
+  plex_url: string
+  plex_token: string
+  prowlarr_url: string
+  prowlarr_api_key: string
+  qbittorrent_url: string
+  qbittorrent_username: string
+  qbittorrent_password: string
+  qbittorrent_category: string
+  beets_enabled: boolean
+  beets_config_path: string
+  beets_library_path: string
+  beets_auto_import: boolean
+  beets_move_files: boolean
+  auto_download_enabled: boolean
+  auto_download_confidence_threshold: number
+  preferred_quality: string
+  max_concurrent_downloads: number
+  download_path: string
+  completed_download_path: string
+  musicbrainz_user_agent: string
+  registration_enabled: boolean
+  max_users: number
+  ml_profiling_enabled: boolean
+  taste_embedding_half_life_days: number
+}
+
 export interface LibraryStats {
   total_artists: number
   total_albums: number
@@ -527,6 +558,12 @@ export const downloadsApi = {
 }
 
 export const settingsApi = {
+  getGeneral: () =>
+    api.get<GeneralSettings>('/api/settings/general'),
+  updateGeneral: (settings: Record<string, string>) =>
+    api.put('/api/settings/general', { settings }),
+  testService: (service: string) =>
+    api.post('/api/settings/services/test', null, { params: { service } }),
   getDownloadSettings: () =>
     api.get<DownloadSettings>('/api/settings/download'),
   getServiceStatus: () =>
