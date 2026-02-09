@@ -5,6 +5,11 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
+# Build with empty API URL so the frontend uses relative paths
+# (proxied to backend via Next.js rewrites in the unified container)
+ARG NEXT_PUBLIC_API_URL=""
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 # Install dependencies first (better layer caching)
 COPY frontend/package*.json ./
 RUN npm install
@@ -14,19 +19,21 @@ COPY frontend/ ./
 RUN npm run build
 
 # ============================================
-# Stage 2: Final image with backend + frontend
+# Stage 2: Final image with all services
 # ============================================
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies (Node.js runtime for Next.js standalone + supervisor)
+# Install system dependencies including PostgreSQL, Redis, and Node.js
 RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
     curl \
     nodejs \
     supervisor \
+    postgresql \
+    redis-server \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -41,22 +48,31 @@ COPY --from=frontend-builder /app/frontend/.next/standalone ./frontend/
 COPY --from=frontend-builder /app/frontend/.next/static ./frontend/.next/static
 COPY --from=frontend-builder /app/frontend/public ./frontend/public
 
-# Copy supervisor config
+# Copy supervisor config and entrypoint
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Create non-root user and config directory
+# Create non-root user for app processes and set up directories
 RUN useradd -m -u 1000 vibarr \
+    && mkdir -p /config /downloads /music /var/log/supervisor /var/run/postgresql \
     && chown -R vibarr:vibarr /app \
-    && mkdir -p /var/log/supervisor /config \
-    && chown -R vibarr:vibarr /var/log/supervisor /config
+    && chown postgres:postgres /var/run/postgresql
 
-LABEL net.unraid.docker.icon="/vibarr-icon.svg"
+LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/jjermany/Vibarr/main/Logo%20and%20Icon/vibarr-icon.svg"
 
 VOLUME /config
+VOLUME /downloads
+VOLUME /music
 
-EXPOSE 3000 8000
+EXPOSE 3000
 
+# Internal service URLs (all localhost within the container)
+ENV DATABASE_URL=postgresql://vibarr:vibarr@localhost:5432/vibarr
+ENV REDIS_URL=redis://localhost:6379/0
+ENV CELERY_BROKER_URL=redis://localhost:6379/1
+ENV CELERY_RESULT_BACKEND=redis://localhost:6379/1
+ENV SECRET_KEY=change-me-in-production
 ENV NODE_ENV=production
-ENV NEXT_PUBLIC_API_URL=http://localhost:8000
 
-CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+ENTRYPOINT ["/entrypoint.sh"]

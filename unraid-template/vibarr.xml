@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Vibarr</Name>
+  <Repository>vibarr/vibarr:latest</Repository>
+  <Registry>https://hub.docker.com/r/vibarr/vibarr</Registry>
+  <Branch>
+    <Tag>latest</Tag>
+    <TagDescription>Latest stable release</TagDescription>
+  </Branch>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/jjermany/Vibarr/issues</Support>
+  <Project>https://github.com/jjermany/Vibarr</Project>
+  <Overview>Vibarr is a Music Metadata Discovery and Recommendation Engine for self-hosted music libraries. Integrates with Plex, Prowlarr, qBittorrent, and beets for automated music discovery and management. Features ML-based recommendations, listening history analytics, multi-user support, and social features. All service settings (API keys, connections, preferences) are configured through the built-in Settings page.</Overview>
+  <Category>MediaApp:Music</Category>
+  <WebUI>http://[IP]:[PORT:3000]</WebUI>
+  <Icon>https://raw.githubusercontent.com/jjermany/Vibarr/main/Logo%20and%20Icon/vibarr-icon.svg</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="3000" Default="3000" Mode="tcp" Description="Port for the Vibarr web interface." Type="Port" Display="always" Required="true" Mask="false">3000</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/vibarr" Mode="rw" Description="Persistent storage for application database, configuration, and cache. Contains PostgreSQL data, Redis data, and secret key." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/vibarr</Config>
+  <Config Name="Downloads" Target="/downloads" Default="" Mode="rw" Description="Download staging directory for music files." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Music Library" Target="/music" Default="" Mode="rw" Description="Path to your music library (same path used in Plex/beets)." Type="Path" Display="always" Required="true" Mask="false"/>
+</Container>
