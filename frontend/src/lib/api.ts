@@ -153,6 +153,7 @@ export interface Download {
   release_size?: number
   release_format?: string
   release_quality?: string
+  indexer_name?: string
   seeders?: number
   leechers?: number
   progress: number
