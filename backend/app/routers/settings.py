@@ -1,19 +1,22 @@
-"""Settings and configuration endpoints for download automation."""
+"""Settings and configuration endpoints.
 
-from typing import Optional, List
+All user-configurable settings are stored in the database and managed
+through these endpoints + the frontend Settings page.
+"""
+
+from typing import Optional, List, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.database import get_db
 from app.models.quality_profile import QualityProfile, DEFAULT_PROFILES
 from app.services.download_client import download_client_service
 from app.services.beets import beets_service
+from app.services import app_settings as cfg
 
 router = APIRouter()
-settings = get_settings()
 
 
 # --- Pydantic Schemas ---
@@ -26,28 +29,38 @@ class DownloadSettingsResponse(BaseModel):
     download_path: str
     completed_download_path: str
 
-class DownloadSettingsUpdate(BaseModel):
-    auto_download_enabled: Optional[bool] = None
-    auto_download_confidence_threshold: Optional[float] = None
-    preferred_quality: Optional[str] = None
-    max_concurrent_downloads: Optional[int] = None
+class GeneralSettingsResponse(BaseModel):
+    spotify_client_id: str
+    spotify_client_secret: str
+    lastfm_api_key: str
+    lastfm_shared_secret: str
+    plex_url: str
+    plex_token: str
+    prowlarr_url: str
+    prowlarr_api_key: str
+    qbittorrent_url: str
+    qbittorrent_username: str
+    qbittorrent_password: str
+    qbittorrent_category: str
+    beets_enabled: bool
+    beets_config_path: str
+    beets_library_path: str
+    beets_auto_import: bool
+    beets_move_files: bool
+    auto_download_enabled: bool
+    auto_download_confidence_threshold: float
+    preferred_quality: str
+    max_concurrent_downloads: int
+    download_path: str
+    completed_download_path: str
+    musicbrainz_user_agent: str
+    registration_enabled: bool
+    max_users: int
+    ml_profiling_enabled: bool
+    taste_embedding_half_life_days: float
 
-class QBittorrentSettingsResponse(BaseModel):
-    configured: bool
-    url: Optional[str] = None
-    username: str
-    category: str
-    connected: bool = False
-    version: Optional[str] = None
-
-class BeetsSettingsResponse(BaseModel):
-    enabled: bool
-    available: bool
-    config_path: str
-    library_path: str
-    auto_import: bool
-    move_files: bool
-    version: Optional[str] = None
+class SettingsUpdateRequest(BaseModel):
+    settings: Dict[str, str]
 
 class QualityProfileResponse(BaseModel):
     id: int
@@ -95,26 +108,79 @@ class ServiceStatusResponse(BaseModel):
     beets: dict
 
 
-# --- Download Settings ---
+# --- All Settings (read / write) ---
+
+@router.get("/general")
+async def get_all_settings(db: AsyncSession = Depends(get_db)):
+    """Get all user-configurable settings."""
+    await cfg.ensure_cache(db)
+    return GeneralSettingsResponse(
+        spotify_client_id=cfg.get_setting("spotify_client_id"),
+        spotify_client_secret=cfg.get_setting("spotify_client_secret"),
+        lastfm_api_key=cfg.get_setting("lastfm_api_key"),
+        lastfm_shared_secret=cfg.get_setting("lastfm_shared_secret"),
+        plex_url=cfg.get_setting("plex_url"),
+        plex_token=cfg.get_setting("plex_token"),
+        prowlarr_url=cfg.get_setting("prowlarr_url"),
+        prowlarr_api_key=cfg.get_setting("prowlarr_api_key"),
+        qbittorrent_url=cfg.get_setting("qbittorrent_url"),
+        qbittorrent_username=cfg.get_setting("qbittorrent_username", "admin"),
+        qbittorrent_password=cfg.get_setting("qbittorrent_password"),
+        qbittorrent_category=cfg.get_setting("qbittorrent_category", "vibarr"),
+        beets_enabled=cfg.get_bool("beets_enabled"),
+        beets_config_path=cfg.get_setting("beets_config_path", "/config/beets/config.yaml"),
+        beets_library_path=cfg.get_setting("beets_library_path", "/music"),
+        beets_auto_import=cfg.get_bool("beets_auto_import", True),
+        beets_move_files=cfg.get_bool("beets_move_files", True),
+        auto_download_enabled=cfg.get_bool("auto_download_enabled"),
+        auto_download_confidence_threshold=cfg.get_float("auto_download_confidence_threshold", 0.8),
+        preferred_quality=cfg.get_setting("preferred_quality", "flac"),
+        max_concurrent_downloads=cfg.get_int("max_concurrent_downloads", 3),
+        download_path=cfg.get_setting("download_path", "/downloads"),
+        completed_download_path=cfg.get_setting("completed_download_path", "/downloads/completed"),
+        musicbrainz_user_agent=cfg.get_setting("musicbrainz_user_agent", "Vibarr/1.0"),
+        registration_enabled=cfg.get_bool("registration_enabled", True),
+        max_users=cfg.get_int("max_users", 10),
+        ml_profiling_enabled=cfg.get_bool("ml_profiling_enabled", True),
+        taste_embedding_half_life_days=cfg.get_float("taste_embedding_half_life_days", 21.0),
+    )
+
+
+@router.put("/general")
+async def update_all_settings(
+    body: SettingsUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update one or more user-configurable settings."""
+    await cfg.update_settings_bulk(db, body.settings)
+    # Reinitialize services that cache connection details
+    _reinit_services()
+    return {"status": "ok", "updated": list(body.settings.keys())}
+
+
+# --- Download Settings (convenience endpoint) ---
 
 @router.get("/download", response_model=DownloadSettingsResponse)
-async def get_download_settings():
+async def get_download_settings(db: AsyncSession = Depends(get_db)):
     """Get current download automation settings."""
+    await cfg.ensure_cache(db)
     return DownloadSettingsResponse(
-        auto_download_enabled=settings.auto_download_enabled,
-        auto_download_confidence_threshold=settings.auto_download_confidence_threshold,
-        preferred_quality=settings.preferred_quality,
-        max_concurrent_downloads=settings.max_concurrent_downloads,
-        download_path=settings.download_path,
-        completed_download_path=settings.completed_download_path,
+        auto_download_enabled=cfg.get_bool("auto_download_enabled"),
+        auto_download_confidence_threshold=cfg.get_float("auto_download_confidence_threshold", 0.8),
+        preferred_quality=cfg.get_setting("preferred_quality", "flac"),
+        max_concurrent_downloads=cfg.get_int("max_concurrent_downloads", 3),
+        download_path=cfg.get_setting("download_path", "/downloads"),
+        completed_download_path=cfg.get_setting("completed_download_path", "/downloads/completed"),
     )
 
 
 # --- Service Status ---
 
 @router.get("/services", response_model=ServiceStatusResponse)
-async def get_service_status():
+async def get_service_status(db: AsyncSession = Depends(get_db)):
     """Get status of all download-related services."""
+    await cfg.ensure_cache(db)
+
     # Prowlarr
     from app.services.prowlarr import prowlarr_service
     prowlarr_connected = False
@@ -140,12 +206,42 @@ async def get_service_status():
         qbittorrent={
             "configured": download_client_service.is_configured,
             "connected": qbit_connected,
-            "url": settings.qbittorrent_url,
-            "category": settings.qbittorrent_category,
+            "url": cfg.get_setting("qbittorrent_url"),
+            "category": cfg.get_setting("qbittorrent_category", "vibarr"),
             "version": qbit_version,
         },
         beets=beets_info,
     )
+
+
+@router.post("/services/test")
+async def test_service_connection(
+    service: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Test connection to a specific service after saving new settings."""
+    await cfg.ensure_cache(db)
+    _reinit_services()
+
+    if service == "prowlarr":
+        from app.services.prowlarr import prowlarr_service
+        if not prowlarr_service.is_available:
+            return {"connected": False, "reason": "Prowlarr URL or API key not configured"}
+        connected = await prowlarr_service.test_connection()
+        return {"connected": connected}
+
+    elif service == "qbittorrent":
+        if not download_client_service.is_configured:
+            return {"connected": False, "reason": "qBittorrent URL not configured"}
+        connected = await download_client_service.test_connection()
+        version = await download_client_service.get_version() if connected else None
+        return {"connected": connected, "version": version}
+
+    elif service == "beets":
+        info = await beets_service.test_connection()
+        return info
+
+    raise HTTPException(status_code=400, detail=f"Unknown service: {service}")
 
 
 # --- Quality Profiles ---
@@ -265,15 +361,16 @@ async def delete_quality_profile(
 # --- Beets ---
 
 @router.get("/beets/config")
-async def get_beets_config():
+async def get_beets_config(db: AsyncSession = Depends(get_db)):
     """Get current beets configuration."""
+    await cfg.ensure_cache(db)
     info = await beets_service.test_connection()
     return {
-        "enabled": settings.beets_enabled,
-        "config_path": settings.beets_config_path,
-        "library_path": settings.beets_library_path,
-        "auto_import": settings.beets_auto_import,
-        "move_files": settings.beets_move_files,
+        "enabled": cfg.get_bool("beets_enabled"),
+        "config_path": cfg.get_setting("beets_config_path", "/config/beets/config.yaml"),
+        "library_path": cfg.get_setting("beets_library_path", "/music"),
+        "auto_import": cfg.get_bool("beets_auto_import", True),
+        "move_files": cfg.get_bool("beets_move_files", True),
         **info,
     }
 
@@ -301,3 +398,12 @@ async def _clear_default_profiles(db: AsyncSession):
     )
     for profile in result.scalars().all():
         profile.is_default = False
+
+
+def _reinit_services():
+    """Reset cached HTTP clients so services pick up new settings."""
+    from app.services.prowlarr import prowlarr_service
+    prowlarr_service._client = None
+
+    download_client_service._client = None
+    download_client_service._authenticated = False

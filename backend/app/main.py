@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db
+from app.services.app_settings import ensure_cache as ensure_settings_cache
 from app.routers import (
     artists,
     albums,
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
     # Startup
     await init_db()
+    await ensure_settings_cache()
     yield
     # Shutdown
     pass

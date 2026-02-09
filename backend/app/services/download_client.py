@@ -5,10 +5,9 @@ import logging
 
 import httpx
 
-from app.config import get_settings
+from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class TorrentInfo:
@@ -83,7 +82,7 @@ class DownloadClientService:
 
     @property
     def is_configured(self) -> bool:
-        return settings.qbittorrent_url is not None
+        return bool(cfg.get_optional("qbittorrent_url"))
 
     async def _get_client(self) -> Optional[httpx.AsyncClient]:
         """Get authenticated HTTP client."""
@@ -92,7 +91,7 @@ class DownloadClientService:
 
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=settings.qbittorrent_url.rstrip("/"),
+                base_url=cfg.get_setting("qbittorrent_url").rstrip("/"),
                 timeout=30.0,
             )
 
@@ -110,8 +109,8 @@ class DownloadClientService:
             response = await self._client.post(
                 "/api/v2/auth/login",
                 data={
-                    "username": settings.qbittorrent_username,
-                    "password": settings.qbittorrent_password,
+                    "username": cfg.get_setting("qbittorrent_username", "admin"),
+                    "password": cfg.get_setting("qbittorrent_password"),
                 },
             )
             if response.status_code == 200 and response.text == "Ok.":
@@ -166,10 +165,12 @@ class DownloadClientService:
         try:
             data: Dict[str, Any] = {"urls": url}
 
-            if category or settings.qbittorrent_category:
-                data["category"] = category or settings.qbittorrent_category
-            if save_path or settings.download_path:
-                data["savepath"] = save_path or settings.download_path
+            qbit_cat = cfg.get_setting("qbittorrent_category", "vibarr")
+            dl_path = cfg.get_setting("download_path", "/downloads")
+            if category or qbit_cat:
+                data["category"] = category or qbit_cat
+            if save_path or dl_path:
+                data["savepath"] = save_path or dl_path
             if tags:
                 data["tags"] = ",".join(tags)
 
@@ -216,8 +217,8 @@ class DownloadClientService:
             params: Dict[str, Any] = {}
             if category:
                 params["category"] = category
-            elif settings.qbittorrent_category:
-                params["category"] = settings.qbittorrent_category
+            elif cfg.get_setting("qbittorrent_category", "vibarr"):
+                params["category"] = cfg.get_setting("qbittorrent_category", "vibarr")
             if filter_state:
                 params["filter"] = filter_state
 
@@ -296,8 +297,8 @@ class DownloadClientService:
             response = await client.post(
                 "/api/v2/torrents/createCategory",
                 data={
-                    "category": settings.qbittorrent_category,
-                    "savePath": settings.download_path,
+                    "category": cfg.get_setting("qbittorrent_category", "vibarr"),
+                    "savePath": cfg.get_setting("download_path", "/downloads"),
                 },
             )
             # 409 means category already exists, which is fine

@@ -8,10 +8,9 @@ from plexapi.server import PlexServer
 from plexapi.library import MusicSection
 from plexapi.audio import Artist as PlexArtist, Album as PlexAlbum, Track as PlexTrack
 
-from app.config import get_settings
+from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class PlexService:
@@ -25,9 +24,11 @@ class PlexService:
     @property
     def server(self) -> Optional[PlexServer]:
         """Get or create Plex server connection."""
-        if self._server is None and settings.plex_url and settings.plex_token:
+        plex_url = cfg.get_optional("plex_url")
+        plex_token = cfg.get_optional("plex_token")
+        if self._server is None and plex_url and plex_token:
             try:
-                self._server = PlexServer(settings.plex_url, settings.plex_token)
+                self._server = PlexServer(plex_url, plex_token)
             except Exception as e:
                 logger.error(f"Failed to connect to Plex server: {e}")
         return self._server

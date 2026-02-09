@@ -6,10 +6,9 @@ import logging
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
-from app.config import get_settings
+from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class SpotifyService:
@@ -22,11 +21,13 @@ class SpotifyService:
     @property
     def client(self) -> Optional[spotipy.Spotify]:
         """Get or create Spotify client."""
-        if self._client is None and settings.spotify_client_id and settings.spotify_client_secret:
+        client_id = cfg.get_optional("spotify_client_id")
+        client_secret = cfg.get_optional("spotify_client_secret")
+        if self._client is None and client_id and client_secret:
             try:
                 auth_manager = SpotifyClientCredentials(
-                    client_id=settings.spotify_client_id,
-                    client_secret=settings.spotify_client_secret,
+                    client_id=client_id,
+                    client_secret=client_secret,
                 )
                 self._client = spotipy.Spotify(auth_manager=auth_manager)
             except Exception as e:

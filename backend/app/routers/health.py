@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.config import get_settings
+from app.services import app_settings as cfg
 
 router = APIRouter()
 settings = get_settings()
@@ -52,10 +53,10 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
 async def service_status():
     """Check status of external service connections."""
     services = {
-        "spotify": {"configured": bool(settings.spotify_client_id), "connected": False},
-        "lastfm": {"configured": bool(settings.lastfm_api_key), "connected": False},
-        "plex": {"configured": bool(settings.plex_url and settings.plex_token), "connected": False},
-        "prowlarr": {"configured": bool(settings.prowlarr_url and settings.prowlarr_api_key), "connected": False},
+        "spotify": {"configured": bool(cfg.get_optional("spotify_client_id")), "connected": False},
+        "lastfm": {"configured": bool(cfg.get_optional("lastfm_api_key")), "connected": False},
+        "plex": {"configured": bool(cfg.get_optional("plex_url") and cfg.get_optional("plex_token")), "connected": False},
+        "prowlarr": {"configured": bool(cfg.get_optional("prowlarr_url") and cfg.get_optional("prowlarr_api_key")), "connected": False},
     }
 
     # Test connections (done async in real implementation)

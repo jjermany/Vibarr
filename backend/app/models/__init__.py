@@ -12,6 +12,7 @@ from app.models.quality_profile import QualityProfile
 from app.models.user import User
 from app.models.social import UserFollow, SharedPlaylist, SharedPlaylistItem, ActivityFeed
 from app.models.automation_rule import AutomationRule, AutomationLog
+from app.models.app_settings import AppSettings
 
 __all__ = [
     "Artist",
@@ -30,4 +31,5 @@ __all__ = [
     "ActivityFeed",
     "AutomationRule",
     "AutomationLog",
+    "AppSettings",
 ]

@@ -44,13 +44,15 @@ COPY --from=frontend-builder /app/frontend/public ./frontend/public
 # Copy supervisor config
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Create non-root user
+# Create non-root user and config directory
 RUN useradd -m -u 1000 vibarr \
     && chown -R vibarr:vibarr /app \
-    && mkdir -p /var/log/supervisor \
-    && chown -R vibarr:vibarr /var/log/supervisor
+    && mkdir -p /var/log/supervisor /config \
+    && chown -R vibarr:vibarr /var/log/supervisor /config
 
 LABEL net.unraid.docker.icon="/vibarr-icon.svg"
+
+VOLUME /config
 
 EXPOSE 3000 8000
 
