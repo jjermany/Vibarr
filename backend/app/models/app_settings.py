@@ -48,15 +48,15 @@ DEFAULT_APP_SETTINGS = [
     {"key": "preferred_quality", "value": "flac", "category": "downloads"},
     {"key": "max_concurrent_downloads", "value": "3", "category": "downloads"},
     {"key": "download_path", "value": "/downloads", "category": "downloads"},
-    {"key": "completed_download_path", "value": "/downloads/completed", "category": "downloads"},
+    {"key": "completed_download_path", "value": "/media/completed", "category": "downloads"},
     # qBittorrent
     {"key": "qbittorrent_url", "value": "", "category": "qbittorrent"},
     {"key": "qbittorrent_username", "value": "admin", "category": "qbittorrent"},
     {"key": "qbittorrent_password", "value": "", "category": "qbittorrent"},
     {"key": "qbittorrent_category", "value": "vibarr", "category": "qbittorrent"},
     {"key": "qbittorrent_categories", "value": "vibarr,music", "category": "qbittorrent"},
-    {"key": "qbittorrent_incomplete_path", "value": "", "category": "qbittorrent"},
-    {"key": "qbittorrent_completed_path", "value": "", "category": "qbittorrent"},
+    {"key": "qbittorrent_incomplete_path", "value": "/incomplete", "category": "qbittorrent"},
+    {"key": "qbittorrent_completed_path", "value": "/media/completed", "category": "qbittorrent"},
     {"key": "qbittorrent_remove_completed", "value": "false", "category": "qbittorrent"},
     # Beets
     {"key": "beets_enabled", "value": "false", "category": "beets"},

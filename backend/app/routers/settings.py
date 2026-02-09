@@ -43,8 +43,8 @@ class GeneralSettingsResponse(BaseModel):
     qbittorrent_password: str = ""
     qbittorrent_category: str = "vibarr"
     qbittorrent_categories: str = "vibarr,music"
-    qbittorrent_incomplete_path: str = ""
-    qbittorrent_completed_path: str = ""
+    qbittorrent_incomplete_path: str = "/incomplete"
+    qbittorrent_completed_path: str = "/media/completed"
     qbittorrent_remove_completed: bool = False
     beets_enabled: bool = False
     beets_config_path: str = "/config/beets/config.yaml"
@@ -56,7 +56,7 @@ class GeneralSettingsResponse(BaseModel):
     preferred_quality: str = "flac"
     max_concurrent_downloads: int = 3
     download_path: str = "/downloads"
-    completed_download_path: str = "/downloads/completed"
+    completed_download_path: str = "/media/completed"
     musicbrainz_user_agent: str = "Vibarr/1.0"
     registration_enabled: bool = True
     max_users: int = 10
@@ -132,8 +132,8 @@ async def get_all_settings(db: AsyncSession = Depends(get_db)):
         qbittorrent_password=cfg.get_setting("qbittorrent_password"),
         qbittorrent_category=cfg.get_setting("qbittorrent_category", "vibarr"),
         qbittorrent_categories=cfg.get_setting("qbittorrent_categories", "vibarr,music"),
-        qbittorrent_incomplete_path=cfg.get_setting("qbittorrent_incomplete_path"),
-        qbittorrent_completed_path=cfg.get_setting("qbittorrent_completed_path"),
+        qbittorrent_incomplete_path=cfg.get_setting("qbittorrent_incomplete_path", "/incomplete"),
+        qbittorrent_completed_path=cfg.get_setting("qbittorrent_completed_path", "/media/completed"),
         qbittorrent_remove_completed=cfg.get_bool("qbittorrent_remove_completed"),
         beets_enabled=cfg.get_bool("beets_enabled"),
         beets_config_path=cfg.get_setting("beets_config_path", "/config/beets/config.yaml"),
@@ -145,7 +145,7 @@ async def get_all_settings(db: AsyncSession = Depends(get_db)):
         preferred_quality=cfg.get_setting("preferred_quality", "flac"),
         max_concurrent_downloads=cfg.get_int("max_concurrent_downloads", 3),
         download_path=cfg.get_setting("download_path", "/downloads"),
-        completed_download_path=cfg.get_setting("completed_download_path", "/downloads/completed"),
+        completed_download_path=cfg.get_setting("completed_download_path", "/media/completed"),
         musicbrainz_user_agent=cfg.get_setting("musicbrainz_user_agent", "Vibarr/1.0"),
         registration_enabled=cfg.get_bool("registration_enabled", True),
         max_users=cfg.get_int("max_users", 10),
@@ -178,7 +178,7 @@ async def get_download_settings(db: AsyncSession = Depends(get_db)):
         preferred_quality=cfg.get_setting("preferred_quality", "flac"),
         max_concurrent_downloads=cfg.get_int("max_concurrent_downloads", 3),
         download_path=cfg.get_setting("download_path", "/downloads"),
-        completed_download_path=cfg.get_setting("completed_download_path", "/downloads/completed"),
+        completed_download_path=cfg.get_setting("completed_download_path", "/media/completed"),
     )
 
 
@@ -321,7 +321,7 @@ async def import_completed_downloads(db: AsyncSession = Depends(get_db)):
     await cfg.ensure_cache(db)
 
     completed_path = cfg.get_setting("qbittorrent_completed_path") or cfg.get_setting(
-        "completed_download_path", "/downloads/completed"
+        "completed_download_path", "/media/completed"
     )
 
     if not completed_path:

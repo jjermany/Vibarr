@@ -258,8 +258,8 @@ function ServicesTab() {
         qbittorrent_password: s.qbittorrent_password ?? '',
         qbittorrent_category: s.qbittorrent_category ?? 'vibarr',
         qbittorrent_categories: s.qbittorrent_categories ?? 'vibarr,music',
-        qbittorrent_incomplete_path: s.qbittorrent_incomplete_path ?? '',
-        qbittorrent_completed_path: s.qbittorrent_completed_path ?? '',
+        qbittorrent_incomplete_path: s.qbittorrent_incomplete_path ?? '/incomplete',
+        qbittorrent_completed_path: s.qbittorrent_completed_path ?? '/media/completed',
         qbittorrent_remove_completed: String(s.qbittorrent_remove_completed ?? false),
         beets_enabled: String(s.beets_enabled ?? false),
         beets_config_path: s.beets_config_path ?? '/config/beets/config.yaml',
@@ -422,30 +422,43 @@ function ServicesTab() {
           <h4 className="text-sm font-medium text-white mb-3">Download Paths</h4>
           <p className="text-xs text-surface-400 mb-3">
             qBittorrent downloads to the incomplete path (your cache drive), then moves files
-            to the completed path when done. Vibarr will import from the completed path.
+            to the completed path when done. Vibarr imports from completed into your music library.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FieldInput
               label="Incomplete Path"
-              description="Where active downloads are stored (e.g. your cache drive)"
+              description="Where active downloads are stored (cache drive for faster I/O)"
               value={form.qbittorrent_incomplete_path || ''}
               onChange={(v) => set('qbittorrent_incomplete_path', v)}
-              placeholder="/mnt/cache/downloads/incomplete"
+              placeholder="/incomplete"
             />
             <FieldInput
               label="Completed Path"
               description="Where finished downloads are moved before import"
               value={form.qbittorrent_completed_path || ''}
               onChange={(v) => set('qbittorrent_completed_path', v)}
-              placeholder="/mnt/user/downloads/completed"
+              placeholder="/media/completed"
             />
           </div>
-          <FieldToggle
-            label="Remove From Client After Import"
-            description="Remove the torrent from qBittorrent after successful import (like Sonarr/Radarr)"
-            checked={form.qbittorrent_remove_completed === 'true'}
-            onChange={(v) => set('qbittorrent_remove_completed', String(v))}
-          />
+          <div className="mt-3">
+            <FieldToggle
+              label="Remove From Client After Import"
+              description="Remove the torrent from qBittorrent after successful import"
+              checked={form.qbittorrent_remove_completed === 'true'}
+              onChange={(v) => set('qbittorrent_remove_completed', String(v))}
+            />
+            {form.qbittorrent_remove_completed === 'true' && (
+              <div className="mt-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-yellow-300">
+                    <strong>Private tracker warning:</strong> Enabling this will stop seeding immediately after import.
+                    If you use private trackers, leave this off so your torrents continue seeding to maintain your ratio.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -769,7 +782,7 @@ function AutomationTab() {
         preferred_quality: s.preferred_quality ?? 'flac',
         max_concurrent_downloads: String(s.max_concurrent_downloads ?? 3),
         download_path: s.download_path ?? '/downloads',
-        completed_download_path: s.completed_download_path ?? '/downloads/completed',
+        completed_download_path: s.completed_download_path ?? '/media/completed',
       })
     }
   }, [data])
@@ -842,9 +855,9 @@ function AutomationTab() {
         <FieldInput
           label="Completed Path"
           description="Directory for completed downloads awaiting import"
-          value={form.completed_download_path || '/downloads/completed'}
+          value={form.completed_download_path || '/media/completed'}
           onChange={(v) => set('completed_download_path', v)}
-          placeholder="/downloads/completed"
+          placeholder="/media/completed"
         />
       </div>
 

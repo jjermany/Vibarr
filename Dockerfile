@@ -55,14 +55,16 @@ RUN chmod +x /entrypoint.sh
 
 # Create non-root user for app processes and set up directories
 RUN useradd -m -u 1000 vibarr \
-    && mkdir -p /config /downloads /music /var/log/supervisor /var/run/postgresql \
-    && chown -R vibarr:vibarr /app \
+    && mkdir -p /config /downloads /incomplete /media/completed /music /var/log/supervisor /var/run/postgresql \
+    && chown -R vibarr:vibarr /app /incomplete /media \
     && chown postgres:postgres /var/run/postgresql
 
 LABEL net.unraid.docker.icon="https://github.com/jjermany/Vibarr/raw/main/Logo%20and%20Icon/vibarr-icon.svg"
 
 VOLUME /config
 VOLUME /downloads
+VOLUME /incomplete
+VOLUME /media
 VOLUME /music
 
 EXPOSE 3000

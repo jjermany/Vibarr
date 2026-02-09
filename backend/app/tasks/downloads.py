@@ -385,7 +385,7 @@ async def _check_download_status_async():
 
     completed_dir = (
         cfg.get_setting("qbittorrent_completed_path")
-        or cfg.get_setting("completed_download_path", "/downloads/completed")
+        or cfg.get_setting("completed_download_path", "/media/completed")
     )
 
     async with AsyncSessionLocal() as db:
