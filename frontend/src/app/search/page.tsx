@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { Search as SearchIcon, Music, Disc, User } from 'lucide-react'
@@ -14,6 +14,14 @@ import { cn } from '@/lib/utils'
 type SearchType = 'all' | 'artists' | 'albums' | 'tracks'
 
 export default function SearchPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center py-16"><LoadingSpinner size="lg" /></div>}>
+      <SearchPageContent />
+    </Suspense>
+  )
+}
+
+function SearchPageContent() {
   const searchParams = useSearchParams()
   const initialQuery = searchParams.get('q') || ''
   const [query, setQuery] = useState(initialQuery)
