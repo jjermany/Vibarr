@@ -63,6 +63,7 @@ class GeneralSettingsResponse(BaseModel):
     max_users: int = 10
     ml_profiling_enabled: bool = True
     taste_embedding_half_life_days: float = 21.0
+    plex_auth_enabled: bool = False
 
 class SettingsUpdateRequest(BaseModel):
     settings: Dict[str, str]
@@ -153,6 +154,7 @@ async def get_all_settings(db: AsyncSession = Depends(get_db)):
         max_users=cfg.get_int("max_users", 10),
         ml_profiling_enabled=cfg.get_bool("ml_profiling_enabled", True),
         taste_embedding_half_life_days=cfg.get_float("taste_embedding_half_life_days", 21.0),
+        plex_auth_enabled=cfg.get_bool("plex_auth_enabled"),
     )
 
 

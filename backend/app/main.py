@@ -3,8 +3,10 @@
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from jose import JWTError, jwt
 
 from app.config import get_settings
 from app.database import init_db
@@ -27,6 +29,23 @@ from app.routers import (
 )
 
 settings = get_settings()
+
+# Paths that do NOT require authentication
+AUTH_EXEMPT_PATHS = {
+    "/",
+    "/health",
+    "/api/auth/login",
+    "/api/auth/register",
+    "/api/auth/setup",
+    "/api/auth/setup-status",
+    "/api/auth/plex/pin",
+    "/api/auth/plex/callback",
+}
+AUTH_EXEMPT_PREFIXES = (
+    "/docs",
+    "/redoc",
+    "/openapi",
+)
 
 
 @asynccontextmanager
@@ -55,6 +74,44 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_authentication(request: Request, call_next):
+    """Enforce JWT authentication on all API routes except exempt paths."""
+    path = request.url.path.rstrip("/")
+
+    # Skip auth for exempt paths
+    if path in AUTH_EXEMPT_PATHS or path.startswith(AUTH_EXEMPT_PREFIXES):
+        return await call_next(request)
+
+    # Skip auth for non-API paths (health, root, static)
+    if not path.startswith("/api"):
+        return await call_next(request)
+
+    # Extract and validate token
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Authentication required"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = auth_header[7:]
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+        if payload.get("sub") is None:
+            raise JWTError("Missing subject")
+    except JWTError:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Invalid or expired token"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return await call_next(request)
+
 
 # Include routers
 app.include_router(health.router, tags=["Health"])

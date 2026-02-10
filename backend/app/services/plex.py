@@ -4,7 +4,9 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 import logging
 
+import httpx
 from plexapi.server import PlexServer
+from plexapi.myplex import MyPlexAccount
 from plexapi.library import MusicSection
 from plexapi.audio import Artist as PlexArtist, Album as PlexAlbum, Track as PlexTrack
 
@@ -302,6 +304,94 @@ class PlexService:
             "view_count": track.viewCount,
             "last_viewed_at": track.lastViewedAt.isoformat() if track.lastViewedAt else None,
         }
+
+
+    async def verify_user_has_music_access(self, user_plex_token: str) -> Dict[str, Any]:
+        """Verify a Plex user has shared access to the music library.
+
+        Connects to the configured Plex server using the user's token and
+        checks whether they can see the music library section. This works
+        for both the server owner and users the library is shared with.
+
+        Returns dict with 'allowed', 'username', 'email', 'plex_id', 'thumb'.
+        """
+        plex_url = cfg.get_optional("plex_url")
+        if not plex_url:
+            return {"allowed": False, "reason": "Plex server URL not configured"}
+
+        try:
+            # Get user account info from plex.tv
+            account = MyPlexAccount(token=user_plex_token)
+            user_info = {
+                "username": account.username,
+                "email": account.email,
+                "plex_id": str(account.id),
+                "thumb": account.thumb,
+            }
+        except Exception as e:
+            logger.warning("Failed to get Plex account info: %s", e)
+            return {"allowed": False, "reason": "Invalid Plex token"}
+
+        try:
+            # Try connecting to the server with the user's token
+            user_server = PlexServer(plex_url, user_plex_token)
+            # Check for a music library section
+            for section in user_server.library.sections():
+                if section.type == "artist":
+                    return {"allowed": True, **user_info}
+
+            return {"allowed": False, "reason": "No music library access", **user_info}
+        except Exception as e:
+            logger.warning("Plex user cannot access server: %s", e)
+            return {"allowed": False, "reason": "No access to this Plex server", **user_info}
+
+    @staticmethod
+    async def create_plex_pin(client_id: str) -> Optional[Dict[str, Any]]:
+        """Create a Plex PIN for the OAuth flow.
+
+        Returns pin id, code, and the auth URL the frontend should open.
+        """
+        headers = {
+            "Accept": "application/json",
+            "X-Plex-Product": "Vibarr",
+            "X-Plex-Client-Identifier": client_id,
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://plex.tv/api/v2/pins",
+                headers=headers,
+                params={"strong": "true"},
+            )
+            if resp.status_code != 201:
+                return None
+            data = resp.json()
+            return {
+                "id": data["id"],
+                "code": data["code"],
+                "auth_url": (
+                    f"https://app.plex.tv/auth#?clientID={client_id}"
+                    f"&code={data['code']}"
+                    f"&context%5Bdevice%5D%5Bproduct%5D=Vibarr"
+                ),
+            }
+
+    @staticmethod
+    async def check_plex_pin(pin_id: int, client_id: str) -> Optional[str]:
+        """Check if a Plex PIN has been claimed. Returns the auth token or None."""
+        headers = {
+            "Accept": "application/json",
+            "X-Plex-Client-Identifier": client_id,
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://plex.tv/api/v2/pins/{pin_id}",
+                headers=headers,
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            token = data.get("authToken")
+            return token if token else None
 
 
 # Singleton instance
