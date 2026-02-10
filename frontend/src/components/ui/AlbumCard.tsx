@@ -1,43 +1,77 @@
 'use client'
 
 import Image from 'next/image'
-import Link from 'next/link'
-import { Play, Heart, Plus, Check } from 'lucide-react'
+import { Play, Plus, Check, Music } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Album } from '@/lib/api'
 
-interface AlbumCardProps {
-  album: Album
-  showArtist?: boolean
-  size?: 'sm' | 'md' | 'lg'
+interface AlbumLike {
+  id: number | string
+  title?: string
+  name?: string
+  cover_url?: string
+  image_url?: string
+  artist_name?: string
+  release_year?: number
+  year?: number
+  in_library?: boolean
+  source?: string
 }
 
-export function AlbumCard({ album, showArtist = true, size = 'md' }: AlbumCardProps) {
+interface AlbumCardProps {
+  album: AlbumLike
+  showArtist?: boolean
+  size?: 'sm' | 'md' | 'lg'
+  onClick?: () => void
+  onAdd?: () => void
+}
+
+export function AlbumCard({ album, showArtist = true, size = 'md', onClick, onAdd }: AlbumCardProps) {
   const sizes = {
     sm: 'w-32',
     md: 'w-40',
     lg: 'w-48',
   }
 
+  // Normalize field names (SearchResult uses name/image_url/year, Album uses title/cover_url/release_year)
+  const title = album.title || album.name || ''
+  const coverUrl = album.cover_url || album.image_url
+  const artistName = album.artist_name
+  const year = album.release_year || album.year
+  const inLibrary = album.in_library ?? false
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (onClick) {
+      e.preventDefault()
+      onClick()
+    }
+  }
+
+  const handleAdd = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (onAdd) onAdd()
+  }
+
   return (
-    <Link
-      href={`/albums/${album.id}`}
-      className={cn('group flex flex-col', sizes[size])}
+    <div
+      onClick={handleClick}
+      className={cn(
+        'group flex flex-col cursor-pointer',
+        sizes[size]
+      )}
     >
       {/* Cover */}
       <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-800 mb-3">
-        {album.cover_url ? (
+        {coverUrl ? (
           <Image
-            src={album.cover_url}
-            alt={album.title}
+            src={coverUrl}
+            alt={title}
             fill
             className="object-cover transition-transform group-hover:scale-105"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-surface-600">
-            <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-            </svg>
+            <Music className="w-12 h-12" />
           </div>
         )}
 
@@ -46,19 +80,31 @@ export function AlbumCard({ album, showArtist = true, size = 'md' }: AlbumCardPr
           <button className="p-2 bg-primary-500 rounded-full hover:bg-primary-600 transition-colors">
             <Play className="w-5 h-5 text-white" fill="white" />
           </button>
-          <button className="p-2 bg-surface-700 rounded-full hover:bg-surface-600 transition-colors">
-            {album.in_library ? (
-              <Check className="w-5 h-5 text-green-400" />
-            ) : (
-              <Plus className="w-5 h-5 text-white" />
-            )}
-          </button>
+          {onAdd && (
+            <button
+              onClick={handleAdd}
+              className="p-2 bg-surface-700 rounded-full hover:bg-surface-600 transition-colors"
+            >
+              {inLibrary ? (
+                <Check className="w-5 h-5 text-green-400" />
+              ) : (
+                <Plus className="w-5 h-5 text-white" />
+              )}
+            </button>
+          )}
         </div>
 
         {/* In library indicator */}
-        {album.in_library && (
+        {inLibrary && (
           <div className="absolute top-2 right-2 p-1 bg-green-500 rounded-full">
             <Check className="w-3 h-3 text-white" />
+          </div>
+        )}
+
+        {/* Source badge for external items */}
+        {album.source && album.source !== 'local' && (
+          <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/60 backdrop-blur-sm rounded text-[10px] font-medium text-surface-300">
+            {album.source === 'lastfm' ? 'Last.fm' : album.source}
           </div>
         )}
       </div>
@@ -66,17 +112,17 @@ export function AlbumCard({ album, showArtist = true, size = 'md' }: AlbumCardPr
       {/* Info */}
       <div className="flex flex-col gap-0.5 min-w-0">
         <span className="text-sm font-medium text-white line-clamp-1 group-hover:text-primary-400 transition-colors">
-          {album.title}
+          {title}
         </span>
-        {showArtist && album.artist_name && (
+        {showArtist && artistName && (
           <span className="text-xs text-surface-400 line-clamp-1">
-            {album.artist_name}
+            {artistName}
           </span>
         )}
-        {album.release_year && (
-          <span className="text-xs text-surface-500">{album.release_year}</span>
+        {year && (
+          <span className="text-xs text-surface-500">{year}</span>
         )}
       </div>
-    </Link>
+    </div>
   )
 }

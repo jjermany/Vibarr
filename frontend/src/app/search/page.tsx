@@ -1,15 +1,18 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { Search as SearchIcon, Music, Disc, User, Check } from 'lucide-react'
-import { searchApi } from '@/lib/api'
+import { Search as SearchIcon, Music, Disc, User, Check, Plus } from 'lucide-react'
+import { searchApi, wishlistApi } from '@/lib/api'
+import type { SearchResult } from '@/lib/api'
 import { AlbumCard } from '@/components/ui/AlbumCard'
 import { ArtistCard } from '@/components/ui/ArtistCard'
+import { PreviewModal } from '@/components/ui/PreviewModal'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { cn } from '@/lib/utils'
+import toast from 'react-hot-toast'
 
 type SearchType = 'all' | 'artists' | 'albums' | 'tracks'
 
@@ -27,6 +30,7 @@ function SearchPageContent() {
   const [query, setQuery] = useState(initialQuery)
   const [searchType, setSearchType] = useState<SearchType>('all')
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery)
+  const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
 
   // Debounce search query
   useEffect(() => {
@@ -47,6 +51,29 @@ function SearchPageContent() {
     results.artists?.length > 0 ||
     results.albums?.length > 0 ||
     results.tracks?.length > 0
+
+  const handlePreview = useCallback((item: SearchResult) => {
+    setPreviewItem(item)
+  }, [])
+
+  const handleAdd = useCallback(async (item: SearchResult) => {
+    try {
+      const isAlbum = item.type === 'album'
+      await wishlistApi.create({
+        item_type: isAlbum ? 'album' : 'artist',
+        artist_name: item.artist_name || (isAlbum ? undefined : item.name),
+        album_title: isAlbum ? item.name : undefined,
+        spotify_id: item.external_ids?.spotify_id,
+        musicbrainz_id: item.external_ids?.musicbrainz_id,
+        priority: 'normal',
+        auto_download: false,
+      })
+      toast.success(`Added "${item.name}" to wishlist`)
+      setPreviewItem(null)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to add to wishlist')
+    }
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -114,8 +141,13 @@ function SearchPageContent() {
               <section>
                 <h2 className="text-lg font-semibold text-white mb-4">Artists</h2>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                  {results.artists.map((artist: any) => (
-                    <ArtistCard key={artist.id} artist={artist} />
+                  {results.artists.map((artist: SearchResult) => (
+                    <ArtistCard
+                      key={artist.id}
+                      artist={artist}
+                      onClick={() => handlePreview(artist)}
+                      onAdd={() => handleAdd(artist)}
+                    />
                   ))}
                 </div>
               </section>
@@ -127,8 +159,13 @@ function SearchPageContent() {
               <section>
                 <h2 className="text-lg font-semibold text-white mb-4">Albums</h2>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                  {results.albums.map((album: any) => (
-                    <AlbumCard key={album.id} album={album} />
+                  {results.albums.map((album: SearchResult) => (
+                    <AlbumCard
+                      key={album.id}
+                      album={album}
+                      onClick={() => handlePreview(album)}
+                      onAdd={() => handleAdd(album)}
+                    />
                   ))}
                 </div>
               </section>
@@ -140,30 +177,51 @@ function SearchPageContent() {
               <section>
                 <h2 className="text-lg font-semibold text-white mb-4">Tracks</h2>
                 <div className="card divide-y divide-surface-800">
-                  {results.tracks.map((track: any, index: number) => (
+                  {results.tracks.map((track: SearchResult, index: number) => (
                     <div
                       key={track.id}
-                      className="flex items-center gap-4 p-3 hover:bg-surface-800/50 transition-colors"
+                      className="flex items-center gap-4 p-3 hover:bg-surface-800/50 transition-colors cursor-pointer"
+                      onClick={() => handlePreview(track)}
                     >
-                      <span className="w-6 text-center text-sm text-surface-500">
-                        {index + 1}
-                      </span>
+                      {/* Track artwork */}
+                      <div className="w-10 h-10 rounded bg-surface-700 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                        {track.image_url ? (
+                          <img src={track.image_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <Music className="w-5 h-5 text-surface-500" />
+                        )}
+                      </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-white truncate">{track.name || track.title}</p>
+                          <p className="text-white truncate">{track.name}</p>
                           {track.in_library && (
                             <span className="flex-shrink-0 p-0.5 bg-green-500 rounded-full" title="In library">
                               <Check className="w-2.5 h-2.5 text-white" />
                             </span>
                           )}
+                          {track.source !== 'local' && (
+                            <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-surface-700 rounded text-surface-400">
+                              {track.source === 'lastfm' ? 'Last.fm' : track.source}
+                            </span>
+                          )}
                         </div>
                         <p className="text-sm text-surface-400 truncate">
                           {track.artist_name}
+                          {track.album_name && ` \u00b7 ${track.album_name}`}
                         </p>
                       </div>
-                      <span className="text-sm text-surface-400">
-                        {formatDuration(track.duration_ms)}
-                      </span>
+                      {!track.in_library && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleAdd(track)
+                          }}
+                          className="flex-shrink-0 p-2 text-surface-400 hover:text-white hover:bg-surface-700 rounded-lg transition-colors"
+                          title="Add to wishlist"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -171,13 +229,13 @@ function SearchPageContent() {
             )}
         </div>
       )}
+
+      {/* Preview Modal */}
+      <PreviewModal
+        item={previewItem}
+        onClose={() => setPreviewItem(null)}
+        onAdd={handleAdd}
+      />
     </div>
   )
-}
-
-function formatDuration(ms: number): string {
-  if (!ms) return '--:--'
-  const minutes = Math.floor(ms / 60000)
-  const seconds = Math.floor((ms % 60000) / 1000)
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }

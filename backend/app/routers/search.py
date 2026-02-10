@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Optional, List
 
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Query, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +42,22 @@ class SearchResponse(BaseModel):
     artists: List[SearchResultItem] = []
     albums: List[SearchResultItem] = []
     tracks: List[SearchResultItem] = []
+
+
+class PreviewResponse(BaseModel):
+    """Preview response for an item."""
+    type: str
+    name: str
+    artist_name: Optional[str] = None
+    image_url: Optional[str] = None
+    bio: Optional[str] = None
+    listeners: Optional[int] = None
+    playcount: Optional[int] = None
+    tags: List[str] = []
+    top_albums: List[dict] = []
+    tracks: List[dict] = []
+    source: str = "lastfm"
+    url: Optional[str] = None
 
 
 async def _search_local_artists(db: AsyncSession, query: str, limit: int) -> List[SearchResultItem]:
@@ -221,6 +237,7 @@ async def _search_lastfm_artists(query: str, limit: int) -> List[SearchResultIte
                 id=f"lastfm:{a['name']}",
                 type="artist",
                 name=a.get("name", ""),
+                image_url=a.get("image_url"),
                 source="lastfm",
                 in_library=False,
             )
@@ -228,6 +245,52 @@ async def _search_lastfm_artists(query: str, limit: int) -> List[SearchResultIte
         ]
     except Exception as e:
         logger.error(f"Last.fm artist search failed: {e}")
+        return []
+
+
+async def _search_lastfm_albums(query: str, limit: int) -> List[SearchResultItem]:
+    """Search Last.fm for albums."""
+    if not lastfm_service.is_available:
+        return []
+    try:
+        results = await lastfm_service.search_albums(query, limit=limit)
+        return [
+            SearchResultItem(
+                id=f"lastfm:{a.get('artist', 'unknown')}:{a['title']}",
+                type="album",
+                name=a.get("title", ""),
+                artist_name=a.get("artist"),
+                image_url=a.get("image_url"),
+                source="lastfm",
+                in_library=False,
+            )
+            for a in results
+        ]
+    except Exception as e:
+        logger.error(f"Last.fm album search failed: {e}")
+        return []
+
+
+async def _search_lastfm_tracks(query: str, limit: int) -> List[SearchResultItem]:
+    """Search Last.fm for tracks."""
+    if not lastfm_service.is_available:
+        return []
+    try:
+        results = await lastfm_service.search_tracks(query, limit=limit)
+        return [
+            SearchResultItem(
+                id=f"lastfm:{t.get('artist', 'unknown')}:{t['title']}",
+                type="track",
+                name=t.get("title", ""),
+                artist_name=t.get("artist"),
+                image_url=t.get("image_url"),
+                source="lastfm",
+                in_library=False,
+            )
+            for t in results
+        ]
+    except Exception as e:
+        logger.error(f"Last.fm track search failed: {e}")
         return []
 
 
@@ -290,12 +353,16 @@ async def search(
             tasks.append(("local_albums", _search_local_albums(db, q, limit)))
         if search_spotify:
             tasks.append(("spotify_albums", _search_spotify_albums(q, limit)))
+        if search_lastfm:
+            tasks.append(("lastfm_albums", _search_lastfm_albums(q, limit)))
 
     if not type or type == "track":
         if search_local:
             tasks.append(("local_tracks", _search_local_tracks(db, q, limit)))
         if search_spotify:
             tasks.append(("spotify_tracks", _search_spotify_tracks(q, limit)))
+        if search_lastfm:
+            tasks.append(("lastfm_tracks", _search_lastfm_tracks(q, limit)))
 
     # Execute all searches concurrently
     task_names = [t[0] for t in tasks]
@@ -328,6 +395,121 @@ async def search(
         albums=albums,
         tracks=tracks,
     )
+
+
+@router.get("/preview", response_model=PreviewResponse)
+async def get_preview(
+    type: str = Query(..., description="Item type: artist, album"),
+    name: str = Query(..., description="Item name (artist name or album title)"),
+    artist: Optional[str] = Query(None, description="Artist name (required for album preview)"),
+    source: str = Query("lastfm", description="Data source: local, lastfm"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get preview data for a search result item.
+
+    Returns detailed information including bio, tags, top albums/tracks,
+    and listener counts for display in a preview modal.
+    """
+    if source == "local":
+        # Preview a local artist or album
+        if type == "artist":
+            result = await db.execute(
+                select(Artist).where(Artist.name.ilike(f"%{name}%"))
+            )
+            artist_obj = result.scalar_one_or_none()
+            if artist_obj:
+                # Get albums for this artist
+                albums_result = await db.execute(
+                    select(Album)
+                    .where(Album.artist_id == artist_obj.id)
+                    .order_by(Album.release_year.desc().nullslast())
+                    .limit(6)
+                )
+                albums = albums_result.scalars().all()
+                return PreviewResponse(
+                    type="artist",
+                    name=artist_obj.name,
+                    image_url=artist_obj.image_url or artist_obj.thumb_url,
+                    bio=artist_obj.biography,
+                    listeners=artist_obj.lastfm_listeners,
+                    playcount=artist_obj.lastfm_playcount,
+                    tags=artist_obj.tags or [],
+                    top_albums=[
+                        {
+                            "title": a.title,
+                            "image_url": a.cover_url or a.thumb_url,
+                            "release_year": a.release_year,
+                        }
+                        for a in albums
+                    ],
+                    source="local",
+                )
+        elif type == "album":
+            result = await db.execute(
+                select(Album)
+                .join(Artist, Album.artist_id == Artist.id)
+                .where(Album.title.ilike(f"%{name}%"))
+            )
+            album_obj = result.scalar_one_or_none()
+            if album_obj:
+                tracks_result = await db.execute(
+                    select(Track)
+                    .where(Track.album_id == album_obj.id)
+                    .order_by(Track.disc_number.asc().nullslast(), Track.track_number.asc().nullslast())
+                )
+                tracks = tracks_result.scalars().all()
+                return PreviewResponse(
+                    type="album",
+                    name=album_obj.title,
+                    artist_name=album_obj.artist.name if album_obj.artist else None,
+                    image_url=album_obj.cover_url or album_obj.thumb_url,
+                    tags=album_obj.genres or [],
+                    tracks=[
+                        {
+                            "title": t.title,
+                            "duration": t.duration_ms,
+                            "track_number": t.track_number,
+                        }
+                        for t in tracks
+                    ],
+                    source="local",
+                )
+
+    # Last.fm preview
+    if type == "artist":
+        data = await lastfm_service.get_artist_preview(name)
+        if data:
+            return PreviewResponse(
+                type="artist",
+                name=data["name"],
+                image_url=data.get("image_url"),
+                bio=data.get("bio"),
+                listeners=data.get("listeners"),
+                playcount=data.get("playcount"),
+                tags=data.get("tags", []),
+                top_albums=data.get("top_albums", []),
+                source="lastfm",
+                url=data.get("url"),
+            )
+    elif type == "album":
+        artist_name = artist or ""
+        data = await lastfm_service.get_album_preview(artist_name, name)
+        if data:
+            return PreviewResponse(
+                type="album",
+                name=data["title"],
+                artist_name=data.get("artist"),
+                image_url=data.get("image_url"),
+                listeners=data.get("listeners"),
+                playcount=data.get("playcount"),
+                tags=data.get("tags", []),
+                tracks=data.get("tracks", []),
+                source="lastfm",
+                url=data.get("url"),
+            )
+
+    raise HTTPException(status_code=404, detail="Preview not found")
 
 
 @router.get("/artists")
@@ -363,14 +545,15 @@ async def search_albums(
     """Search for albums only."""
     search_query = f"{artist} {q}" if artist else q
 
-    local_results, spotify_results = await asyncio.gather(
+    local_results, spotify_results, lastfm_results = await asyncio.gather(
         _search_local_albums(db, q, limit, artist_filter=artist),
         _search_spotify_albums(search_query, limit),
+        _search_lastfm_albums(search_query, limit),
         return_exceptions=True,
     )
 
     albums = []
-    for result in [local_results, spotify_results]:
+    for result in [local_results, spotify_results, lastfm_results]:
         if isinstance(result, list):
             albums.extend(result)
 
@@ -394,14 +577,15 @@ async def search_tracks(
         search_parts.append(album)
     search_query = " ".join(search_parts)
 
-    local_results, spotify_results = await asyncio.gather(
+    local_results, spotify_results, lastfm_results = await asyncio.gather(
         _search_local_tracks(db, q, limit),
         _search_spotify_tracks(search_query, limit),
+        _search_lastfm_tracks(search_query, limit),
         return_exceptions=True,
     )
 
     tracks = []
-    for result in [local_results, spotify_results]:
+    for result in [local_results, spotify_results, lastfm_results]:
         if isinstance(result, list):
             tracks.extend(result)
 
