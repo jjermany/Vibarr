@@ -37,6 +37,9 @@ musicbrainzngs==0.7.1
 pylast==5.2.0
 plexapi==4.15.7
 
+# Music Tagging
+beets>=1.6.0
+
 # Utilities
 python-dotenv==1.0.1
 tenacity==8.2.3
