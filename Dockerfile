@@ -77,11 +77,12 @@ VOLUME /media
 
 EXPOSE 3000
 
-# Internal service URLs (all localhost within the container)
-ENV DATABASE_URL=postgresql://vibarr:vibarr@localhost:5432/vibarr
-ENV REDIS_URL=redis://localhost:6379/0
-ENV CELERY_BROKER_URL=redis://localhost:6379/1
-ENV CELERY_RESULT_BACKEND=redis://localhost:6379/1
+# Internal service URLs (use 127.0.0.1 instead of localhost to avoid
+# IPv6 resolution issues — all services bind to IPv4 only)
+ENV DATABASE_URL=postgresql://vibarr:vibarr@127.0.0.1:5432/vibarr
+ENV REDIS_URL=redis://127.0.0.1:6379/0
+ENV CELERY_BROKER_URL=redis://127.0.0.1:6379/1
+ENV CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
 ENV SECRET_KEY=change-me-in-production
 ENV NODE_ENV=production
 
