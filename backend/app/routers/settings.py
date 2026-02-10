@@ -53,6 +53,7 @@ class GeneralSettingsResponse(BaseModel):
     sabnzbd_url: str = ""
     sabnzbd_api_key: str = ""
     sabnzbd_category: str = "music"
+    sabnzbd_remove_completed: bool = True
     beets_enabled: bool = False
     beets_config_path: str = "/config/beets/config.yaml"
     beets_library_path: str = "/media/music"
@@ -153,6 +154,7 @@ async def get_all_settings(
         sabnzbd_url=cfg.get_setting("sabnzbd_url"),
         sabnzbd_api_key=cfg.get_setting("sabnzbd_api_key"),
         sabnzbd_category=cfg.get_setting("sabnzbd_category", "music"),
+        sabnzbd_remove_completed=cfg.get_bool("sabnzbd_remove_completed", True),
         beets_enabled=cfg.get_bool("beets_enabled"),
         beets_config_path=cfg.get_setting("beets_config_path", "/config/beets/config.yaml"),
         beets_library_path=cfg.get_setting("beets_library_path", "/media/music"),

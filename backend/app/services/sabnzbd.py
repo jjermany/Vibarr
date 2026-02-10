@@ -268,6 +268,21 @@ class SabnzbdService:
             logger.error(f"Failed to delete NZB: {e}")
             return False
 
+    async def delete_history_item(self, nzo_id: str, del_files: bool = False) -> bool:
+        """Delete a completed download from history."""
+        client = await self._get_client()
+        if not client:
+            return False
+        try:
+            params = self._api_params(mode="history", name="delete", value=nzo_id)
+            if del_files:
+                params["del_files"] = 1
+            response = await client.get("/api", params=params)
+            return response.status_code == 200
+        except Exception as e:
+            logger.error(f"Failed to delete NZB from history: {e}")
+            return False
+
     async def get_active_count(self) -> int:
         """Get the number of actively downloading NZBs."""
         queue = await self.get_queue()
