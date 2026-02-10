@@ -1,11 +1,18 @@
 """Database configuration and session management."""
 
+import os
+
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 
 from app.config import get_settings
 
 settings = get_settings()
+
+# Ensure asyncpg doesn't try to read /root/.postgresql/ SSL files when
+# running as a non-root user (e.g. vibarr via supervisord).  The database
+# is always local (same container) so SSL is unnecessary.
+os.environ.setdefault("PGSSLMODE", "disable")
 
 # Create async engine
 engine = create_async_engine(
