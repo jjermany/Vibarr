@@ -174,7 +174,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
           </button>
 
           {notifOpen && (
-            <div className="absolute right-0 top-full mt-1 w-80 bg-surface-800 border border-surface-700 rounded-lg shadow-xl z-50 overflow-hidden">
+            <div className="absolute right-0 top-full mt-1 w-80 bg-surface-900 border border-surface-700 rounded-lg shadow-2xl z-50 overflow-hidden backdrop-blur-xl">
               <div className="px-4 py-3 border-b border-surface-700 flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-white">
                   Notifications
@@ -262,7 +262,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 w-48 bg-surface-800 border border-surface-700 rounded-lg shadow-xl z-50 py-1">
+              <div className="absolute right-0 top-full mt-1 w-48 bg-surface-900 border border-surface-700 rounded-lg shadow-2xl z-50 py-1 backdrop-blur-xl">
                 <div className="px-3 py-2 border-b border-surface-700">
                   <div className="text-sm font-medium text-white truncate">
                     {user.display_name || user.username}
@@ -281,7 +281,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
                     setMenuOpen(false)
                     router.push('/profile')
                   }}
-                  className="w-full text-left px-3 py-2 text-sm text-surface-300 hover:text-white hover:bg-surface-700 transition-colors flex items-center gap-2"
+                  className="w-full text-left px-3 py-2 text-sm text-surface-300 hover:text-white hover:bg-surface-800 transition-colors flex items-center gap-2"
                 >
                   <User className="w-4 h-4" />
                   Profile
@@ -291,7 +291,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
                     setMenuOpen(false)
                     logout()
                   }}
-                  className="w-full text-left px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-surface-700 transition-colors flex items-center gap-2"
+                  className="w-full text-left px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-surface-800 transition-colors flex items-center gap-2"
                 >
                   <LogOut className="w-4 h-4" />
                   Sign Out
