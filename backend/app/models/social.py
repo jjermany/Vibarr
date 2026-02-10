@@ -120,7 +120,7 @@ class ActivityFeed(Base):
 
     # Activity details
     message: Mapped[Optional[str]] = mapped_column(String(500))
-    metadata: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    extra_data: Mapped[Optional[dict]] = mapped_column("extra_data", JSON, default=dict)
 
     # Visibility
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
