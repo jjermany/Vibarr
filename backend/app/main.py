@@ -28,7 +28,7 @@ from app.routers import (
     wishlist,
 )
 
-settings = get_settings()
+config = get_settings()
 
 # Paths that do NOT require authentication
 AUTH_EXEMPT_PATHS = {
@@ -60,9 +60,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title=settings.app_name,
+    title=config.app_name,
     description="Music Metadata Discovery & Recommendation Engine",
-    version=settings.app_version,
+    version=config.app_version,
     lifespan=lifespan,
 )
 
@@ -100,7 +100,7 @@ async def require_authentication(request: Request, call_next):
 
     token = auth_header[7:]
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+        payload = jwt.decode(token, config.secret_key, algorithms=["HS256"])
         if payload.get("sub") is None:
             raise JWTError("Missing subject")
     except JWTError:
@@ -134,7 +134,7 @@ app.include_router(automation.router, prefix="/api/automation", tags=["Automatio
 async def root():
     """Root endpoint."""
     return {
-        "name": settings.app_name,
-        "version": settings.app_version,
+        "name": config.app_name,
+        "version": config.app_version,
         "description": "Music Metadata Discovery & Recommendation Engine",
     }
