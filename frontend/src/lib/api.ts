@@ -303,6 +303,7 @@ export interface GeneralSettings {
   sabnzbd_url: string
   sabnzbd_api_key: string
   sabnzbd_category: string
+  sabnzbd_remove_completed: boolean
   beets_enabled: boolean
   beets_config_path: string
   beets_library_path: string

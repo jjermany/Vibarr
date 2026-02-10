@@ -8,6 +8,7 @@ from app.database import AsyncSessionLocal
 from app.services.prowlarr import prowlarr_service
 from app.services.download_client import download_client_service
 from app.services.beets import beets_service
+from app.services.sabnzbd import sabnzbd_service
 from app.services import app_settings as cfg
 from app.models.wishlist import WishlistItem, WishlistStatus
 from app.models.download import Download, DownloadStatus
@@ -566,6 +567,24 @@ async def _import_completed_download_async(download_id: int):
                 download.status_message = "Download complete (beets not available)"
 
             await db.commit()
+
+            # Remove from SABnzbd history after successful import
+            if (
+                download.download_client == "sabnzbd"
+                and download.download_id
+                and cfg.get_bool("sabnzbd_remove_completed", True)
+            ):
+                try:
+                    await sabnzbd_service.delete_history_item(
+                        download.download_id, del_files=True
+                    )
+                    logger.info(
+                        f"Removed NZB {download.download_id} from SABnzbd history"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to remove NZB from SABnzbd history: {e}"
+                    )
 
             # Update wishlist item
             if download.wishlist_id:

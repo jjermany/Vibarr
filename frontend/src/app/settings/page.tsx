@@ -342,6 +342,11 @@ function ServicesTab() {
         qbittorrent_incomplete_path: s.qbittorrent_incomplete_path ?? '/incomplete',
         qbittorrent_completed_path: s.qbittorrent_completed_path ?? '/media/completed',
         qbittorrent_remove_completed: String(s.qbittorrent_remove_completed ?? false),
+        sabnzbd_enabled: String(s.sabnzbd_enabled ?? false),
+        sabnzbd_url: s.sabnzbd_url ?? '',
+        sabnzbd_api_key: s.sabnzbd_api_key ?? '',
+        sabnzbd_category: s.sabnzbd_category ?? 'music',
+        sabnzbd_remove_completed: String(s.sabnzbd_remove_completed ?? true),
         beets_enabled: String(s.beets_enabled ?? false),
         beets_config_path: s.beets_config_path ?? '/config/beets/config.yaml',
         beets_library_path: s.beets_library_path ?? '/media/music',
@@ -508,47 +513,56 @@ function ServicesTab() {
           )}
         </div>
 
-        <div className="border-t border-surface-700 pt-4">
-          <h4 className="text-sm font-medium text-white mb-3">Download Paths</h4>
-          <p className="text-xs text-surface-400 mb-3">
-            qBittorrent downloads to the incomplete path (your cache drive), then moves files
-            to the completed path when done. Vibarr imports from completed into your music library.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FieldInputWithBrowse
-              label="Incomplete Path"
-              description="Where active downloads are stored (cache drive for faster I/O)"
-              value={form.qbittorrent_incomplete_path || ''}
-              onChange={(v) => set('qbittorrent_incomplete_path', v)}
-              placeholder="/incomplete"
-            />
-            <FieldInputWithBrowse
-              label="Completed Path"
-              description="Where finished downloads are moved before import"
-              value={form.qbittorrent_completed_path || ''}
-              onChange={(v) => set('qbittorrent_completed_path', v)}
-              placeholder="/media/completed"
-            />
-          </div>
-          <div className="mt-3">
-            <FieldToggle
-              label="Remove From Client After Import"
-              description="Remove the torrent from qBittorrent after successful import"
-              checked={form.qbittorrent_remove_completed === 'true'}
-              onChange={(v) => set('qbittorrent_remove_completed', String(v))}
-            />
-            {form.qbittorrent_remove_completed === 'true' && (
-              <div className="mt-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
-                  <p className="text-xs text-yellow-300">
-                    <strong>Private tracker warning:</strong> Enabling this will stop seeding immediately after import.
-                    If you use private trackers, leave this off so your torrents continue seeding to maintain your ratio.
-                  </p>
-                </div>
+      </div>
+
+      {/* Download Paths (shared by qBittorrent and SABnzbd) */}
+      <div className="card p-6 space-y-4">
+        <h3 className="text-lg font-semibold text-white">Download Paths</h3>
+        <p className="text-xs text-surface-400">
+          Shared by both qBittorrent and SABnzbd. Downloads go to the incomplete path first,
+          then move to the completed path when finished. Vibarr imports from completed into your music library.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FieldInputWithBrowse
+            label="Incomplete Path"
+            description="Where active downloads are stored (cache drive for faster I/O)"
+            value={form.qbittorrent_incomplete_path || ''}
+            onChange={(v) => set('qbittorrent_incomplete_path', v)}
+            placeholder="/incomplete"
+          />
+          <FieldInputWithBrowse
+            label="Completed Path"
+            description="Where finished downloads are moved before import"
+            value={form.qbittorrent_completed_path || ''}
+            onChange={(v) => set('qbittorrent_completed_path', v)}
+            placeholder="/media/completed"
+          />
+        </div>
+        <div className="border-t border-surface-700 pt-3">
+          <h4 className="text-sm font-medium text-white mb-3">Remove After Import</h4>
+          <FieldToggle
+            label="Remove Torrents After Import"
+            description="Remove the torrent from qBittorrent after successful import"
+            checked={form.qbittorrent_remove_completed === 'true'}
+            onChange={(v) => set('qbittorrent_remove_completed', String(v))}
+          />
+          {form.qbittorrent_remove_completed === 'true' && (
+            <div className="mt-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-yellow-300">
+                  <strong>Private tracker warning:</strong> Enabling this will stop seeding immediately after import.
+                  If you use private trackers, leave this off so your torrents continue seeding to maintain your ratio.
+                </p>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+          <FieldToggle
+            label="Remove Usenet Downloads After Import"
+            description="Remove the NZB from SABnzbd history after successful import (recommended for usenet)"
+            checked={form.sabnzbd_remove_completed === 'true'}
+            onChange={(v) => set('sabnzbd_remove_completed', String(v))}
+          />
         </div>
       </div>
 
@@ -630,6 +644,7 @@ function ServicesTab() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FieldInputWithBrowse
             label="Config Path"
+            description="Path to the beets configuration file"
             value={form.beets_config_path || ''}
             onChange={(v) => set('beets_config_path', v)}
             placeholder="/config/beets/config.yaml"

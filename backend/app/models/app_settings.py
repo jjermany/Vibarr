@@ -63,6 +63,7 @@ DEFAULT_APP_SETTINGS = [
     {"key": "sabnzbd_api_key", "value": "", "category": "sabnzbd"},
     {"key": "sabnzbd_category", "value": "music", "category": "sabnzbd"},
     {"key": "sabnzbd_enabled", "value": "false", "category": "sabnzbd"},
+    {"key": "sabnzbd_remove_completed", "value": "true", "category": "sabnzbd"},
     # Beets
     {"key": "beets_enabled", "value": "false", "category": "beets"},
     {"key": "beets_config_path", "value": "/config/beets/config.yaml", "category": "beets"},
