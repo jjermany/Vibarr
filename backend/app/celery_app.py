@@ -38,6 +38,9 @@ celery_app.conf.update(
     # Result backend
     result_expires=86400,  # Results expire after 1 day
 
+    # Connection retry on startup (required for Celery 6+)
+    broker_connection_retry_on_startup=True,
+
     # Worker settings
     worker_prefetch_multiplier=1,
     worker_concurrency=4,

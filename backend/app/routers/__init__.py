@@ -1,8 +1,10 @@
 """API routers."""
 
 from app.routers import (
-    artists,
     albums,
+    artists,
+    auth,
+    automation,
     discovery,
     downloads,
     health,
@@ -10,6 +12,7 @@ from app.routers import (
     recommendations,
     search,
     settings,
+    social,
     stats,
     wishlist,
 )
@@ -17,6 +20,8 @@ from app.routers import (
 __all__ = [
     "artists",
     "albums",
+    "auth",
+    "automation",
     "discovery",
     "downloads",
     "health",
@@ -24,6 +29,7 @@ __all__ = [
     "recommendations",
     "search",
     "settings",
+    "social",
     "stats",
     "wishlist",
 ]

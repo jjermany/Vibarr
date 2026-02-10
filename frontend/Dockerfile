@@ -13,7 +13,7 @@ RUN npm run build
 # Production image
 FROM node:20-alpine AS runner
 
-LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/jjermany/Vibarr/main/icons/vibarr-icon.svg"
+LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/jjermany/Vibarr/main/icons/vibarr-icon.png"
 
 WORKDIR /app
 
