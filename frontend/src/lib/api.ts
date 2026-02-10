@@ -7,6 +7,35 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+// Attach JWT token to every request
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('vibarr_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+  }
+  return config
+})
+
+// On 401 responses, clear auth and redirect to login
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (
+      error.response?.status === 401 &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.startsWith('/login') &&
+      !window.location.pathname.startsWith('/setup')
+    ) {
+      localStorage.removeItem('vibarr_token')
+      localStorage.removeItem('vibarr_user')
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  }
+)
+
 // Types
 
 export interface Artist {
@@ -280,6 +309,7 @@ export interface GeneralSettings {
   max_users: number
   ml_profiling_enabled: boolean
   taste_embedding_half_life_days: number
+  plex_auth_enabled: boolean
 }
 
 export interface LibraryStats {
@@ -628,7 +658,19 @@ export const statsApi = {
     api.get('/api/stats/comparison', { params: { days } }),
 }
 
-// Phase 5: Authentication
+// Authentication & Setup
+export interface SetupStatus {
+  setup_required: boolean
+  plex_configured: boolean
+  plex_auth_enabled: boolean
+}
+
+export interface PlexPin {
+  id: number
+  code: string
+  auth_url: string
+}
+
 export const authApi = {
   register: (data: { username: string; email: string; password: string; display_name?: string }) =>
     api.post('/api/auth/register', data),
@@ -638,6 +680,15 @@ export const authApi = {
   updateProfile: (data: Partial<AppUser>) => api.patch('/api/auth/me', data),
   listUsers: () => api.get<AppUser[]>('/api/auth/users'),
   getUser: (userId: number) => api.get<UserProfile>(`/api/auth/users/${userId}`),
+  // Setup
+  getSetupStatus: () => api.get<SetupStatus>('/api/auth/setup-status'),
+  setup: (data: { username: string; email: string; password: string }) =>
+    api.post('/api/auth/setup', data),
+  // Plex OAuth
+  createPlexPin: (clientId?: string) =>
+    api.post<PlexPin>('/api/auth/plex/pin', { client_id: clientId }),
+  plexCallback: (pinId: number, clientId: string) =>
+    api.post('/api/auth/plex/callback', { pin_id: pinId, client_id: clientId }),
 }
 
 // Phase 5: Social

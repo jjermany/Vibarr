@@ -72,6 +72,9 @@ DEFAULT_APP_SETTINGS = [
     # Multi-user settings
     {"key": "registration_enabled", "value": "true", "category": "general"},
     {"key": "max_users", "value": "10", "category": "general"},
+    # Authentication / Security
+    {"key": "plex_auth_enabled", "value": "false", "category": "auth"},
+    {"key": "setup_completed", "value": "false", "category": "auth"},
     # ML Taste Profiling
     {"key": "ml_profiling_enabled", "value": "true", "category": "general"},
     {"key": "taste_embedding_half_life_days", "value": "21.0", "category": "general"},

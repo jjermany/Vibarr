@@ -7,6 +7,7 @@ import {
   Download,
   Music2,
   Shield,
+  Lock,
   CheckCircle,
   XCircle,
   AlertCircle,
@@ -19,18 +20,22 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  Users,
 } from 'lucide-react'
 import {
   settingsApi,
+  authApi,
   type QualityProfile,
   type ServiceStatus,
   type GeneralSettings,
+  type AppUser,
 } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { LoadingPage } from '@/components/ui/LoadingSpinner'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
-type Tab = 'services' | 'quality' | 'automation'
+type Tab = 'services' | 'quality' | 'automation' | 'security'
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('services')
@@ -51,6 +56,7 @@ export default function SettingsPage() {
           { id: 'services' as Tab, label: 'Services', icon: Server },
           { id: 'quality' as Tab, label: 'Quality Profiles', icon: Music2 },
           { id: 'automation' as Tab, label: 'Automation', icon: Download },
+          { id: 'security' as Tab, label: 'Security', icon: Lock },
         ]).map((tab) => (
           <button
             key={tab.id}
@@ -72,6 +78,7 @@ export default function SettingsPage() {
       {activeTab === 'services' && <ServicesTab />}
       {activeTab === 'quality' && <QualityProfilesTab />}
       {activeTab === 'automation' && <AutomationTab />}
+      {activeTab === 'security' && <SecurityTab />}
     </div>
   )
 }
@@ -966,6 +973,255 @@ function AutomationTab() {
             <HardDrive className="w-4 h-4" />
           )}
           Scan &amp; Import Completed Downloads
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// --- Security Tab ---
+
+function SecurityTab() {
+  const queryClient = useQueryClient()
+  const { user } = useAuth()
+
+  const { data: setupData } = useQuery({
+    queryKey: ['setup-status'],
+    queryFn: () => authApi.getSetupStatus(),
+  })
+
+  const { data: settingsData, isLoading } = useQuery({
+    queryKey: ['general-settings'],
+    queryFn: () => settingsApi.getGeneral(),
+  })
+
+  const { data: usersData } = useQuery({
+    queryKey: ['all-users'],
+    queryFn: () => authApi.listUsers(),
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: (settings: Record<string, string>) =>
+      settingsApi.updateGeneral(settings),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['general-settings'] })
+      queryClient.invalidateQueries({ queryKey: ['setup-status'] })
+      toast.success('Security settings saved')
+    },
+    onError: () => toast.error('Failed to save security settings'),
+  })
+
+  const [plexAuthEnabled, setPlexAuthEnabled] = useState(false)
+  const [registrationEnabled, setRegistrationEnabled] = useState(true)
+  const [maxUsers, setMaxUsers] = useState('10')
+
+  useEffect(() => {
+    if (settingsData?.data) {
+      const s = settingsData.data
+      setRegistrationEnabled(s.registration_enabled ?? true)
+      setMaxUsers(String(s.max_users ?? 10))
+    }
+  }, [settingsData])
+
+  useEffect(() => {
+    if (setupData?.data) {
+      setPlexAuthEnabled(setupData.data.plex_auth_enabled ?? false)
+    }
+  }, [setupData])
+
+  if (isLoading) return <LoadingPage message="Loading security settings..." />
+
+  const plexConfigured = setupData?.data?.plex_configured ?? false
+  const users = usersData?.data ?? []
+
+  const handleSave = () => {
+    saveMutation.mutate({
+      plex_auth_enabled: String(plexAuthEnabled),
+      registration_enabled: String(registrationEnabled),
+      max_users: maxUsers,
+    })
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Authentication overview */}
+      <div className="card p-6">
+        <h3 className="text-lg font-semibold text-white mb-2">
+          Authentication
+        </h3>
+        <p className="text-sm text-surface-400 mb-4">
+          All routes are protected by authentication. Users must sign in with
+          their admin credentials or via Plex to access Vibarr.
+        </p>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between p-4 bg-surface-800/50 rounded-lg">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-green-400" />
+              </div>
+              <div>
+                <span className="font-medium text-white">Password Authentication</span>
+                <div className="text-sm text-surface-400">
+                  Admin accounts sign in with username and password
+                </div>
+              </div>
+            </div>
+            <span className="text-sm font-medium text-green-400">Active</span>
+          </div>
+
+          <div className="flex items-center justify-between p-4 bg-surface-800/50 rounded-lg">
+            <div className="flex items-center gap-4">
+              <div className={cn(
+                'w-10 h-10 rounded-lg flex items-center justify-center',
+                plexAuthEnabled && plexConfigured ? 'bg-green-500/20' : 'bg-surface-700'
+              )}>
+                {plexAuthEnabled && plexConfigured ? (
+                  <CheckCircle className="w-5 h-5 text-green-400" />
+                ) : (
+                  <XCircle className="w-5 h-5 text-surface-500" />
+                )}
+              </div>
+              <div>
+                <span className="font-medium text-white">Plex Authentication</span>
+                <div className="text-sm text-surface-400">
+                  Allow Plex users with shared music library access to sign in
+                </div>
+              </div>
+            </div>
+            <span className={cn(
+              'text-sm font-medium',
+              plexAuthEnabled && plexConfigured ? 'text-green-400' : 'text-surface-500'
+            )}>
+              {plexAuthEnabled && plexConfigured ? 'Active' : 'Disabled'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Plex Authentication */}
+      <div className="card p-6 space-y-4">
+        <h3 className="text-lg font-semibold text-white">Plex Sign-In</h3>
+        <p className="text-sm text-surface-400">
+          When enabled, users who have been granted shared access to your Plex
+          music library can sign in to Vibarr using their Plex account. This
+          works similarly to how Overseerr handles Plex authentication.
+        </p>
+
+        {!plexConfigured && (
+          <div className="flex items-start gap-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+            <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-yellow-300">
+              Plex must be configured in the Services tab before enabling Plex
+              authentication. Add your Plex URL and token first.
+            </p>
+          </div>
+        )}
+
+        <FieldToggle
+          label="Enable Plex Authentication"
+          description="Allow Plex users with music library access to sign in"
+          checked={plexAuthEnabled}
+          onChange={setPlexAuthEnabled}
+        />
+
+        {plexAuthEnabled && plexConfigured && (
+          <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-lg">
+            <div className="flex items-start gap-2">
+              <Shield className="w-4 h-4 text-primary-400 mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-primary-300">
+                <strong>How it works:</strong> When a Plex user signs in, Vibarr
+                verifies they have access to your Plex server's music library. If
+                verified, a local account is automatically created for them. Plex
+                users are non-admin by default.
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Registration */}
+      <div className="card p-6 space-y-4">
+        <h3 className="text-lg font-semibold text-white">Registration</h3>
+        <FieldToggle
+          label="Allow Registration"
+          description="Allow new users to create accounts with username/password"
+          checked={registrationEnabled}
+          onChange={setRegistrationEnabled}
+        />
+        <FieldInput
+          label="Max Users"
+          description="Maximum number of user accounts allowed"
+          value={maxUsers}
+          onChange={setMaxUsers}
+          type="number"
+          placeholder="10"
+        />
+      </div>
+
+      {/* Active users */}
+      <div className="card p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Users className="w-5 h-5 text-surface-400" />
+          <h3 className="text-lg font-semibold text-white">
+            Active Users ({users.length})
+          </h3>
+        </div>
+        <div className="space-y-2">
+          {users.map((u: any) => (
+            <div
+              key={u.id}
+              className="flex items-center justify-between p-3 bg-surface-800/50 rounded-lg"
+            >
+              <div className="flex items-center gap-3">
+                {u.avatar_url ? (
+                  <img
+                    src={u.avatar_url}
+                    alt=""
+                    className="w-8 h-8 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-primary-600/30 flex items-center justify-center">
+                    <span className="text-xs font-medium text-primary-400">
+                      {(u.display_name || u.username || '?')[0].toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                <div>
+                  <div className="text-sm font-medium text-white">
+                    {u.display_name || u.username}
+                  </div>
+                  <div className="text-xs text-surface-400">
+                    Joined{' '}
+                    {u.created_at
+                      ? new Date(u.created_at).toLocaleDateString()
+                      : 'unknown'}
+                  </div>
+                </div>
+              </div>
+              {u.id === user?.id && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary-500/20 text-primary-400 font-medium">
+                  You
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Save button */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saveMutation.isPending}
+          className="btn-primary flex items-center gap-2"
+        >
+          {saveMutation.isPending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Save className="w-4 h-4" />
+          )}
+          Save Security Settings
         </button>
       </div>
     </div>

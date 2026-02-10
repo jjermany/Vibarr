@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
@@ -17,6 +18,8 @@ from app.services.auth import (
     get_password_hash,
     require_user,
 )
+from app.services import app_settings as cfg
+from app.services.plex import plex_service
 
 router = APIRouter()
 
@@ -66,6 +69,21 @@ class UserResponse(BaseModel):
     created_at: str
 
 
+class SetupRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+
+
+class PlexPinRequest(BaseModel):
+    client_id: Optional[str] = None
+
+
+class PlexCallbackRequest(BaseModel):
+    pin_id: int
+    client_id: str
+
+
 def _user_to_dict(user: User) -> dict:
     """Convert user model to response dict."""
     return {
@@ -84,6 +102,165 @@ def _user_to_dict(user: User) -> dict:
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
+
+# --- Setup & Status ---
+
+@router.get("/setup-status")
+async def get_setup_status(db: AsyncSession = Depends(get_db)):
+    """Check whether initial setup has been completed.
+
+    Setup is required when there are no users in the database.
+    """
+    await cfg.ensure_cache(db)
+    count_result = await db.execute(select(func.count(User.id)))
+    user_count = count_result.scalar() or 0
+
+    plex_configured = bool(cfg.get_optional("plex_url") and cfg.get_optional("plex_token"))
+    plex_auth_enabled = cfg.get_bool("plex_auth_enabled")
+
+    return {
+        "setup_required": user_count == 0,
+        "plex_configured": plex_configured,
+        "plex_auth_enabled": plex_auth_enabled and plex_configured,
+    }
+
+
+@router.post("/setup", response_model=TokenResponse)
+async def initial_setup(request: SetupRequest, db: AsyncSession = Depends(get_db)):
+    """Create the initial admin account during first-time setup.
+
+    Only works when there are zero users in the database.
+    """
+    count_result = await db.execute(select(func.count(User.id)))
+    user_count = count_result.scalar() or 0
+
+    if user_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Setup has already been completed",
+        )
+
+    user = User(
+        username=request.username,
+        email=request.email,
+        hashed_password=get_password_hash(request.password),
+        display_name=request.username,
+        is_admin=True,
+        last_login_at=datetime.utcnow(),
+    )
+    db.add(user)
+
+    # Mark setup as completed
+    await cfg.update_setting(db, "setup_completed", "true")
+    await db.commit()
+    await db.refresh(user)
+
+    token = create_access_token(data={"sub": user.id})
+    return TokenResponse(
+        access_token=token,
+        user=_user_to_dict(user),
+    )
+
+
+# --- Plex OAuth ---
+
+@router.post("/plex/pin")
+async def create_plex_pin(request: PlexPinRequest):
+    """Generate a Plex PIN for the OAuth login flow.
+
+    The frontend should open the returned auth_url in a popup/new tab,
+    then poll /plex/callback with the pin_id until it succeeds.
+    """
+    client_id = request.client_id or str(uuid4())
+    pin_data = await plex_service.create_plex_pin(client_id)
+    if not pin_data:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to create Plex PIN",
+        )
+    return pin_data
+
+
+@router.post("/plex/callback", response_model=TokenResponse)
+async def plex_callback(request: PlexCallbackRequest, db: AsyncSession = Depends(get_db)):
+    """Exchange a claimed Plex PIN for a Vibarr JWT.
+
+    Checks the PIN, verifies the user has music library access, then
+    creates or updates the local user account and returns a token.
+    """
+    await cfg.ensure_cache(db)
+
+    if not cfg.get_bool("plex_auth_enabled"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Plex authentication is not enabled",
+        )
+
+    # Check PIN status
+    token = await plex_service.check_plex_pin(request.pin_id, request.client_id)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Plex PIN not yet claimed or expired",
+        )
+
+    # Verify the user has access to the music library
+    verification = await plex_service.verify_user_has_music_access(token)
+    if not verification.get("allowed"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=verification.get("reason", "No access to music library"),
+        )
+
+    plex_username = verification["username"]
+    plex_email = verification.get("email", "")
+
+    # Find or create local user
+    result = await db.execute(
+        select(User).where(User.plex_username == plex_username)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user and plex_email:
+        # Also try matching by email
+        result = await db.execute(
+            select(User).where(func.lower(User.email) == plex_email.lower())
+        )
+        user = result.scalar_one_or_none()
+
+    if user:
+        # Update existing user's Plex credentials
+        user.plex_token = token
+        user.plex_username = plex_username
+        user.avatar_url = user.avatar_url or verification.get("thumb")
+        user.last_login_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(user)
+    else:
+        # Create new user from Plex account
+        user = User(
+            username=plex_username,
+            email=plex_email or f"{plex_username}@plex.local",
+            hashed_password=get_password_hash(str(uuid4())),  # random password
+            display_name=plex_username,
+            plex_token=token,
+            plex_username=plex_username,
+            avatar_url=verification.get("thumb"),
+            is_admin=False,
+            last_login_at=datetime.utcnow(),
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+    jwt_token = create_access_token(data={"sub": user.id})
+    return TokenResponse(
+        access_token=jwt_token,
+        user=_user_to_dict(user),
+    )
+
+
+# --- Standard auth ---
 
 @router.post("/register", response_model=TokenResponse)
 async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
