@@ -62,10 +62,11 @@ async def get_current_user(
 
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-        user_id: int = payload.get("sub")
-        if user_id is None:
+        sub = payload.get("sub")
+        if sub is None:
             return None
-    except JWTError:
+        user_id = int(sub)
+    except (JWTError, ValueError, TypeError):
         return None
 
     result = await db.execute(select(User).where(User.id == user_id))

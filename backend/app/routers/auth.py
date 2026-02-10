@@ -155,7 +155,7 @@ async def initial_setup(request: SetupRequest, db: AsyncSession = Depends(get_db
     await db.commit()
     await db.refresh(user)
 
-    token = create_access_token(data={"sub": user.id})
+    token = create_access_token(data={"sub": str(user.id)})
     return TokenResponse(
         access_token=token,
         user=_user_to_dict(user),
@@ -253,7 +253,7 @@ async def plex_callback(request: PlexCallbackRequest, db: AsyncSession = Depends
         await db.commit()
         await db.refresh(user)
 
-    jwt_token = create_access_token(data={"sub": user.id})
+    jwt_token = create_access_token(data={"sub": str(user.id)})
     return TokenResponse(
         access_token=jwt_token,
         user=_user_to_dict(user),
@@ -294,7 +294,7 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
     await db.commit()
     await db.refresh(user)
 
-    token = create_access_token(data={"sub": user.id})
+    token = create_access_token(data={"sub": str(user.id)})
     return TokenResponse(
         access_token=token,
         user=_user_to_dict(user),
@@ -315,7 +315,7 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
     user.last_login_at = datetime.utcnow()
     await db.commit()
 
-    token = create_access_token(data={"sub": user.id})
+    token = create_access_token(data={"sub": str(user.id)})
     return TokenResponse(
         access_token=token,
         user=_user_to_dict(user),
