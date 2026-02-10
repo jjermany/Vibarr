@@ -36,6 +36,35 @@ class LastFMService:
         """Check if Last.fm service is available."""
         return self.network is not None
 
+    def _get_artist_image(self, artist: pylast.Artist) -> Optional[str]:
+        """Get artist image URL, trying cover image then top album fallback."""
+        try:
+            cover = artist.get_cover_image()
+            if cover:
+                return cover
+        except Exception:
+            pass
+        # Fallback: use the top album's cover art
+        try:
+            top_albums = artist.get_top_albums(limit=1)
+            if top_albums:
+                album_cover = top_albums[0].item.get_cover_image()
+                if album_cover:
+                    return album_cover
+        except Exception:
+            pass
+        return None
+
+    def _get_album_image(self, album: pylast.Album) -> Optional[str]:
+        """Get album cover image URL."""
+        try:
+            cover = album.get_cover_image()
+            if cover:
+                return cover
+        except Exception:
+            pass
+        return None
+
     async def search_artists(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         """Search for artists."""
         if not self.network:
@@ -44,16 +73,73 @@ class LastFMService:
         try:
             results = self.network.search_for_artist(query)
             artists = results.get_next_page()[:limit]
-            return [
-                {
+            artist_results = []
+            for artist in artists:
+                image_url = self._get_artist_image(artist)
+                listeners = None
+                try:
+                    listeners = artist.get_listener_count()
+                except Exception:
+                    pass
+                artist_results.append({
                     "name": artist.name,
                     "url": artist.get_url(),
-                    "listeners": artist.get_listener_count() if hasattr(artist, "get_listener_count") else None,
-                }
-                for artist in artists
-            ]
+                    "image_url": image_url,
+                    "listeners": listeners,
+                })
+            return artist_results
         except Exception as e:
             logger.error(f"Last.fm artist search failed: {e}")
+            return []
+
+    async def search_albums(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Search for albums."""
+        if not self.network:
+            return []
+
+        try:
+            results = self.network.search_for_album(query)
+            albums = results.get_next_page()[:limit]
+            album_results = []
+            for album in albums:
+                image_url = self._get_album_image(album)
+                album_results.append({
+                    "title": album.title,
+                    "artist": album.artist.name if album.artist else None,
+                    "url": album.get_url(),
+                    "image_url": image_url,
+                })
+            return album_results
+        except Exception as e:
+            logger.error(f"Last.fm album search failed: {e}")
+            return []
+
+    async def search_tracks(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Search for tracks."""
+        if not self.network:
+            return []
+
+        try:
+            results = self.network.search_for_track("", query)
+            tracks = results.get_next_page()[:limit]
+            track_results = []
+            for track in tracks:
+                image_url = None
+                try:
+                    album = track.get_album()
+                    if album:
+                        image_url = self._get_album_image(album)
+                except Exception:
+                    pass
+                track_results.append({
+                    "title": track.title,
+                    "artist": track.artist.name if track.artist else None,
+                    "url": track.get_url(),
+                    "image_url": image_url,
+                })
+            return track_results
+        except Exception as e:
+            logger.error(f"Last.fm track search failed: {e}")
             return []
 
     async def get_artist_info(self, artist_name: str) -> Optional[Dict[str, Any]]:
@@ -63,16 +149,128 @@ class LastFMService:
 
         try:
             artist = self.network.get_artist(artist_name)
+            image_url = self._get_artist_image(artist)
+            bio = None
+            try:
+                bio = artist.get_bio_summary()
+            except Exception:
+                pass
             return {
                 "name": artist.name,
                 "url": artist.get_url(),
-                "bio": artist.get_bio_summary() if hasattr(artist, "get_bio_summary") else None,
+                "image_url": image_url,
+                "bio": bio,
                 "listeners": artist.get_listener_count(),
                 "playcount": artist.get_playcount(),
                 "tags": [tag.item.name for tag in artist.get_top_tags(limit=10)],
             }
         except Exception as e:
             logger.error(f"Last.fm get artist info failed: {e}")
+            return None
+
+    async def get_artist_preview(self, artist_name: str) -> Optional[Dict[str, Any]]:
+        """Get comprehensive artist preview data for the UI."""
+        if not self.network:
+            return None
+
+        try:
+            artist = self.network.get_artist(artist_name)
+            image_url = self._get_artist_image(artist)
+            bio = None
+            try:
+                bio = artist.get_bio_summary()
+            except Exception:
+                pass
+
+            # Get top albums with images
+            top_albums = []
+            try:
+                albums = artist.get_top_albums(limit=6)
+                for item in albums:
+                    album_image = self._get_album_image(item.item)
+                    top_albums.append({
+                        "title": item.item.title,
+                        "playcount": item.weight,
+                        "image_url": album_image,
+                    })
+            except Exception:
+                pass
+
+            # Get tags
+            tags = []
+            try:
+                tags = [tag.item.name for tag in artist.get_top_tags(limit=10)]
+            except Exception:
+                pass
+
+            listeners = None
+            playcount = None
+            try:
+                listeners = artist.get_listener_count()
+                playcount = artist.get_playcount()
+            except Exception:
+                pass
+
+            return {
+                "name": artist.name,
+                "url": artist.get_url(),
+                "image_url": image_url,
+                "bio": bio,
+                "listeners": listeners,
+                "playcount": playcount,
+                "tags": tags,
+                "top_albums": top_albums,
+            }
+        except Exception as e:
+            logger.error(f"Last.fm get artist preview failed: {e}")
+            return None
+
+    async def get_album_preview(self, artist_name: str, album_title: str) -> Optional[Dict[str, Any]]:
+        """Get comprehensive album preview data for the UI."""
+        if not self.network:
+            return None
+
+        try:
+            album = self.network.get_album(artist_name, album_title)
+            image_url = self._get_album_image(album)
+
+            # Get tracks
+            tracks = []
+            try:
+                for track in album.get_tracks():
+                    tracks.append({
+                        "title": track.title,
+                        "duration": track.get_duration() if hasattr(track, "get_duration") else None,
+                    })
+            except Exception:
+                pass
+
+            tags = []
+            try:
+                tags = [tag.item.name for tag in album.get_top_tags(limit=10)]
+            except Exception:
+                pass
+
+            listeners = None
+            playcount = None
+            try:
+                listeners = album.get_listener_count()
+                playcount = album.get_playcount()
+            except Exception:
+                pass
+
+            return {
+                "title": album.title,
+                "artist": artist_name,
+                "url": album.get_url(),
+                "image_url": image_url,
+                "listeners": listeners,
+                "playcount": playcount,
+                "tags": tags,
+                "tracks": tracks,
+            }
+        except Exception as e:
+            logger.error(f"Last.fm get album preview failed: {e}")
             return None
 
     async def get_similar_artists(

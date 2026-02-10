@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -13,14 +14,19 @@ import {
   Headphones,
   TrendingUp,
 } from 'lucide-react'
-import { discoveryApi, libraryApi, statsApi } from '@/lib/api'
+import { discoveryApi, libraryApi, statsApi, wishlistApi } from '@/lib/api'
+import type { SearchResult } from '@/lib/api'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { AlbumCard } from '@/components/ui/AlbumCard'
 import { ArtistCard } from '@/components/ui/ArtistCard'
+import { PreviewModal } from '@/components/ui/PreviewModal'
 import { LoadingPage } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
+import toast from 'react-hot-toast'
 
 export function DiscoveryHome() {
+  const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
+
   const { data: discoveryData, isLoading: discoveryLoading } = useQuery({
     queryKey: ['discovery', 'home'],
     queryFn: () => discoveryApi.getHome(),
@@ -40,6 +46,39 @@ export function DiscoveryHome() {
     queryKey: ['stats', 'overview', 7],
     queryFn: () => statsApi.overview(7),
   })
+
+  const handlePreview = useCallback((item: any) => {
+    // Normalize discovery item to SearchResult shape for the PreviewModal
+    const normalized: SearchResult = {
+      id: String(item.id),
+      type: item.type || 'artist',
+      name: item.name || item.title || '',
+      artist_name: item.artist_name,
+      image_url: item.image_url || item.cover_url,
+      year: item.release_year,
+      source: item.source || 'local',
+      in_library: item.in_library ?? false,
+      external_ids: {},
+    }
+    setPreviewItem(normalized)
+  }, [])
+
+  const handleAdd = useCallback(async (item: SearchResult) => {
+    try {
+      const isAlbum = item.type === 'album'
+      await wishlistApi.create({
+        item_type: isAlbum ? 'album' : 'artist',
+        artist_name: item.artist_name || (isAlbum ? undefined : item.name),
+        album_title: isAlbum ? item.name : undefined,
+        priority: 'normal',
+        auto_download: false,
+      })
+      toast.success(`Added "${item.name}" to wishlist`)
+      setPreviewItem(null)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to add to wishlist')
+    }
+  }, [])
 
   if (discoveryLoading || recentLoading) {
     return <LoadingPage message="Loading your personalized feed..." />
@@ -139,7 +178,21 @@ export function DiscoveryHome() {
           />
           <div className="flex gap-4 overflow-x-auto pb-4 -mx-4 px-4 sm:-mx-6 sm:px-6 scrollbar-hide">
             {recentAlbums.map((album: any) => (
-              <AlbumCard key={album.id} album={album} />
+              <AlbumCard
+                key={album.id}
+                album={album}
+                onClick={() => handlePreview({ ...album, type: 'album' })}
+                onAdd={() => handleAdd({
+                  id: String(album.id),
+                  type: 'album',
+                  name: album.title || album.name || '',
+                  artist_name: album.artist_name,
+                  image_url: album.cover_url || album.image_url,
+                  source: 'local',
+                  in_library: album.in_library ?? true,
+                  external_ids: {},
+                })}
+              />
             ))}
           </div>
         </section>
@@ -157,10 +210,37 @@ export function DiscoveryHome() {
             <div className="flex gap-4 overflow-x-auto pb-4 -mx-4 px-4 sm:-mx-6 sm:px-6 scrollbar-hide">
               {section.type === 'artist_list'
                 ? section.items.map((artist: any) => (
-                    <ArtistCard key={artist.id} artist={artist} />
+                    <ArtistCard
+                      key={artist.id}
+                      artist={artist}
+                      onClick={() => handlePreview({ ...artist, type: 'artist' })}
+                      onAdd={() => handleAdd({
+                        id: String(artist.id),
+                        type: 'artist',
+                        name: artist.name || '',
+                        image_url: artist.image_url,
+                        source: 'local',
+                        in_library: artist.in_library ?? false,
+                        external_ids: {},
+                      })}
+                    />
                   ))
                 : section.items.map((album: any) => (
-                    <AlbumCard key={album.id} album={album} />
+                    <AlbumCard
+                      key={album.id}
+                      album={album}
+                      onClick={() => handlePreview({ ...album, type: 'album' })}
+                      onAdd={() => handleAdd({
+                        id: String(album.id),
+                        type: 'album',
+                        name: album.title || album.name || '',
+                        artist_name: album.artist_name,
+                        image_url: album.cover_url || album.image_url,
+                        source: 'local',
+                        in_library: album.in_library ?? false,
+                        external_ids: {},
+                      })}
+                    />
                   ))}
             </div>
           ) : (
@@ -187,6 +267,13 @@ export function DiscoveryHome() {
           }
         />
       )}
+
+      {/* Preview Modal */}
+      <PreviewModal
+        item={previewItem}
+        onClose={() => setPreviewItem(null)}
+        onAdd={handleAdd}
+      />
     </div>
   )
 }

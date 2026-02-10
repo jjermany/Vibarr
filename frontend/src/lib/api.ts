@@ -127,6 +127,21 @@ export interface SearchResponse {
   tracks: SearchResult[]
 }
 
+export interface PreviewData {
+  type: string
+  name: string
+  artist_name?: string
+  image_url?: string
+  bio?: string
+  listeners?: number
+  playcount?: number
+  tags: string[]
+  top_albums: { title: string; image_url?: string; playcount?: number; release_year?: number }[]
+  tracks: { title: string; duration?: number; track_number?: number }[]
+  source: string
+  url?: string
+}
+
 export interface Recommendation {
   id: number
   type: string
@@ -554,6 +569,8 @@ export const searchApi = {
     api.get('/api/search/albums', { params: { q: query, artist, limit } }),
   tracks: (query: string, limit?: number) =>
     api.get('/api/search/tracks', { params: { q: query, limit } }),
+  preview: (type: string, name: string, artist?: string, source?: string) =>
+    api.get<PreviewData>('/api/search/preview', { params: { type, name, artist, source } }),
 }
 
 export const discoveryApi = {
