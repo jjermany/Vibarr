@@ -2,7 +2,7 @@
 <Container version="2">
   <Name>Vibarr</Name>
   <Repository>jjermany/vibarr:latest</Repository>
-  <Registry>https://hub.docker.com/r/jjermany/vibarr</Registry>
+  <Registry>https://hub.docker.com/r/jermcee/vibarr</Registry>
   <Branch>
     <Tag>latest</Tag>
     <TagDescription>Latest stable release</TagDescription>
