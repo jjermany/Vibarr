@@ -21,6 +21,7 @@ import {
   EyeOff,
   Loader2,
   Users,
+  FolderOpen,
 } from 'lucide-react'
 import {
   settingsApi,
@@ -33,6 +34,7 @@ import {
 } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { LoadingPage } from '@/components/ui/LoadingSpinner'
+import { PathBrowserModal } from '@/components/ui/PathBrowserModal'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -219,6 +221,61 @@ function FieldToggle({
           )}
         />
       </button>
+    </div>
+  )
+}
+
+function FieldInputWithBrowse({
+  label,
+  description,
+  value,
+  onChange,
+  placeholder,
+  dirOnly = true,
+  browseTitle,
+}: {
+  label: string
+  description?: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  dirOnly?: boolean
+  browseTitle?: string
+}) {
+  const [browserOpen, setBrowserOpen] = useState(false)
+
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-sm font-medium text-white">{label}</label>
+      {description && (
+        <p className="text-xs text-surface-400">{description}</p>
+      )}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="flex-1 bg-surface-800 border border-surface-700 rounded-lg px-3 py-2 text-sm text-white placeholder-surface-500 focus:outline-none focus:border-primary-500"
+        />
+        <button
+          type="button"
+          onClick={() => setBrowserOpen(true)}
+          className="px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg text-surface-400 hover:text-white hover:border-primary-500 transition-colors flex items-center gap-1.5"
+          title="Browse..."
+        >
+          <FolderOpen className="w-4 h-4" />
+          <span className="text-xs hidden sm:inline">Browse</span>
+        </button>
+      </div>
+      <PathBrowserModal
+        isOpen={browserOpen}
+        onClose={() => setBrowserOpen(false)}
+        onSelect={onChange}
+        initialPath={value || '/'}
+        dirOnly={dirOnly}
+        title={browseTitle || `Select ${label}`}
+      />
     </div>
   )
 }
@@ -450,14 +507,14 @@ function ServicesTab() {
             to the completed path when done. Vibarr imports from completed into your music library.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FieldInput
+            <FieldInputWithBrowse
               label="Incomplete Path"
               description="Where active downloads are stored (cache drive for faster I/O)"
               value={form.qbittorrent_incomplete_path || ''}
               onChange={(v) => set('qbittorrent_incomplete_path', v)}
               placeholder="/incomplete"
             />
-            <FieldInput
+            <FieldInputWithBrowse
               label="Completed Path"
               description="Where finished downloads are moved before import"
               value={form.qbittorrent_completed_path || ''}
@@ -501,8 +558,15 @@ function ServicesTab() {
         </div>
         <FieldToggle label="Enable Beets" description="Automatically tag and organize completed downloads" checked={form.beets_enabled === 'true'} onChange={(v) => set('beets_enabled', String(v))} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FieldInput label="Config Path" value={form.beets_config_path || ''} onChange={(v) => set('beets_config_path', v)} placeholder="/config/beets/config.yaml" />
-          <FieldInput
+          <FieldInputWithBrowse
+            label="Config Path"
+            value={form.beets_config_path || ''}
+            onChange={(v) => set('beets_config_path', v)}
+            placeholder="/config/beets/config.yaml"
+            dirOnly={false}
+            browseTitle="Select Beets Config File"
+          />
+          <FieldInputWithBrowse
             label="Library Path"
             description="Must be under the same /media mount as completed downloads for hardlinks to work"
             value={form.beets_library_path || ''}
@@ -883,7 +947,7 @@ function AutomationTab() {
           placeholder="3"
         />
 
-        <FieldInput
+        <FieldInputWithBrowse
           label="Download Path"
           description="Directory where active downloads are stored"
           value={form.download_path || '/downloads'}
@@ -891,7 +955,7 @@ function AutomationTab() {
           placeholder="/downloads"
         />
 
-        <FieldInput
+        <FieldInputWithBrowse
           label="Completed Path"
           description="Directory for completed downloads awaiting import"
           value={form.completed_download_path || '/media/completed'}
@@ -1043,7 +1107,10 @@ function StorageTab() {
   const limitGb = parseInt(storageLimitGb) || 0
   const limitBytes = limitGb * 1024 * 1024 * 1024
   const usedBytes = storage?.total_music_bytes ?? 0
-  const usagePercent = limitBytes > 0 ? Math.min(100, (usedBytes / limitBytes) * 100) : 0
+  const diskTotal = storage?.disk_total_bytes ?? 0
+  // When a limit is set, show usage against the limit; otherwise show usage against disk capacity
+  const effectiveCapacity = limitBytes > 0 ? limitBytes : diskTotal
+  const usagePercent = effectiveCapacity > 0 ? Math.min(100, (usedBytes / effectiveCapacity) * 100) : 0
 
   const handleSave = () => {
     saveMutation.mutate({ storage_limit_gb: storageLimitGb })
@@ -1064,11 +1131,11 @@ function StorageTab() {
         ) : storage ? (
           <div className="space-y-4">
             {/* Usage bar */}
-            {limitGb > 0 && (
+            {effectiveCapacity > 0 && (
               <div>
                 <div className="flex items-center justify-between text-sm mb-2">
                   <span className="text-surface-400">
-                    {formatBytes(usedBytes)} of {limitGb} GB used
+                    {formatBytes(usedBytes)} of {limitGb > 0 ? `${limitGb} GB limit` : formatBytes(diskTotal) + ' disk'} used
                   </span>
                   <span className={cn(
                     'font-medium',
@@ -1124,7 +1191,7 @@ function StorageTab() {
             {/* Disk info */}
             {storage.disk_total_bytes > 0 && (
               <div className="text-xs text-surface-400 pt-2 border-t border-surface-700">
-                Disk: {formatBytes(storage.disk_free_bytes)} free of {formatBytes(storage.disk_total_bytes)} total
+                Library disk: {formatBytes(storage.disk_free_bytes)} free of {formatBytes(storage.disk_total_bytes)} total
               </div>
             )}
           </div>
