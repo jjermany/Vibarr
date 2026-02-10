@@ -16,7 +16,7 @@
   <Category>MediaApp:Music</Category>
   <WebUI>http://[IP]:[PORT:3000]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/jjermany/Vibarr/main/unraid-template/vibarr.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/jjermany/Vibarr/main/icons/vibarr-icon.svg</Icon>
+  <Icon>https://raw.githubusercontent.com/jjermany/Vibarr/main/icons/vibarr-icon.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>

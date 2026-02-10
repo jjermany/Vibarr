@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.artist import Artist
 from app.models.album import Album
+from app.routers.albums import AlbumResponse
 
 router = APIRouter()
 
@@ -109,7 +110,7 @@ async def get_artist(
     return response
 
 
-@router.get("/{artist_id}/albums", response_model=List["AlbumResponse"])
+@router.get("/{artist_id}/albums", response_model=List[AlbumResponse])
 async def get_artist_albums(
     artist_id: int,
     in_library: Optional[bool] = Query(None),
@@ -173,6 +174,3 @@ async def refresh_artist_metadata(
     return {"status": "refresh_queued", "artist_id": artist_id}
 
 
-# Forward reference for type hints
-from app.routers.albums import AlbumResponse
-ArtistDetailResponse.model_rebuild()

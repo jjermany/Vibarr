@@ -68,7 +68,7 @@ RUN useradd -m -u 1000 vibarr \
     && chown -R vibarr:vibarr /app /incomplete /media \
     && chown postgres:postgres /var/run/postgresql
 
-LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/jjermany/Vibarr/main/icons/vibarr-icon.svg"
+LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/jjermany/Vibarr/main/icons/vibarr-icon.png"
 
 VOLUME /config
 VOLUME /downloads
