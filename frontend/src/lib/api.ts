@@ -325,6 +325,27 @@ export interface StorageUsage {
   disk_free_bytes: number
 }
 
+export interface BrowseEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  size: number | null
+}
+
+export interface BrowseResult {
+  current_path: string
+  parent: string | null
+  entries: BrowseEntry[]
+}
+
+export interface Notification {
+  id: number
+  type: 'success' | 'error' | 'info'
+  message: string
+  status: string
+  timestamp: string | null
+}
+
 export interface LibraryStats {
   total_artists: number
   total_albums: number
@@ -642,6 +663,10 @@ export const settingsApi = {
     api.put('/api/settings/qbittorrent/categories', data),
   importCompleted: () => api.post('/api/settings/downloads/import-completed'),
   getStorageUsage: () => api.get<StorageUsage>('/api/settings/storage'),
+  browse: (path?: string) =>
+    api.get<BrowseResult>('/api/settings/browse', { params: { path: path || '/' } }),
+  getNotifications: (limit?: number) =>
+    api.get<{ notifications: Notification[]; count: number }>('/api/settings/notifications', { params: { limit } }),
 }
 
 export const statsApi = {

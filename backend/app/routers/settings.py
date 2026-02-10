@@ -623,6 +623,108 @@ async def get_storage_usage(
     }
 
 
+# --- Filesystem Browse ---
+
+@router.get("/browse")
+async def browse_filesystem(
+    path: str = "/",
+    admin: User = Depends(require_admin),
+):
+    """Browse directories on the server filesystem. Admin only.
+
+    Returns a list of directories and files at the given path so the
+    admin can pick paths from the UI rather than typing them manually.
+    """
+    from pathlib import Path as _Path
+    import os
+
+    target = _Path(path)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"Path does not exist: {path}")
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail=f"Path is not a directory: {path}")
+
+    entries = []
+    try:
+        for entry in sorted(target.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
+            try:
+                stat = entry.stat()
+                entries.append({
+                    "name": entry.name,
+                    "path": str(entry),
+                    "is_dir": entry.is_dir(),
+                    "size": stat.st_size if entry.is_file() else None,
+                })
+            except (PermissionError, OSError):
+                continue
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {path}")
+
+    parent = str(target.parent) if str(target) != "/" else None
+
+    return {
+        "current_path": str(target),
+        "parent": parent,
+        "entries": entries,
+    }
+
+
+# --- Notifications ---
+
+@router.get("/notifications")
+async def get_notifications(
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Get recent notifications (download events, imports, errors). Admin only."""
+    from app.models.download import Download, DownloadStatus
+    from sqlalchemy import desc
+
+    # Fetch recent downloads as notification-like events
+    result = await db.execute(
+        select(Download)
+        .order_by(desc(Download.updated_at))
+        .limit(limit)
+    )
+    downloads = result.scalars().all()
+
+    notifications = []
+    for dl in downloads:
+        ntype = "info"
+        if dl.status == DownloadStatus.COMPLETED:
+            ntype = "success"
+            message = f"{dl.artist_name} - {dl.album_title} completed"
+            if dl.beets_imported:
+                message += " and imported"
+        elif dl.status == DownloadStatus.FAILED:
+            ntype = "error"
+            message = f"{dl.artist_name} - {dl.album_title} failed"
+            if dl.status_message:
+                message += f": {dl.status_message}"
+        elif dl.status == DownloadStatus.DOWNLOADING:
+            ntype = "info"
+            message = f"{dl.artist_name} - {dl.album_title} downloading ({dl.progress}%)"
+        elif dl.status == DownloadStatus.IMPORTING:
+            ntype = "info"
+            message = f"{dl.artist_name} - {dl.album_title} importing..."
+        elif dl.status == DownloadStatus.SEARCHING:
+            ntype = "info"
+            message = f"Searching for {dl.artist_name} - {dl.album_title}"
+        else:
+            message = f"{dl.artist_name} - {dl.album_title}: {dl.status.value}"
+
+        notifications.append({
+            "id": dl.id,
+            "type": ntype,
+            "message": message,
+            "status": dl.status.value,
+            "timestamp": (dl.updated_at or dl.created_at).isoformat() if (dl.updated_at or dl.created_at) else None,
+        })
+
+    return {"notifications": notifications, "count": len(notifications)}
+
+
 # --- Helpers ---
 
 async def _clear_default_profiles(db: AsyncSession):
