@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models.quality_profile import QualityProfile, DEFAULT_PROFILES
 from app.models.user import User
 from app.services.download_client import download_client_service
+from app.services.sabnzbd import sabnzbd_service
 from app.services.beets import beets_service
 from app.services import app_settings as cfg
 from app.services.auth import require_admin
@@ -48,6 +49,10 @@ class GeneralSettingsResponse(BaseModel):
     qbittorrent_incomplete_path: str = "/incomplete"
     qbittorrent_completed_path: str = "/media/completed"
     qbittorrent_remove_completed: bool = False
+    sabnzbd_enabled: bool = False
+    sabnzbd_url: str = ""
+    sabnzbd_api_key: str = ""
+    sabnzbd_category: str = "music"
     beets_enabled: bool = False
     beets_config_path: str = "/config/beets/config.yaml"
     beets_library_path: str = "/media/music"
@@ -114,6 +119,7 @@ class QualityProfileUpdate(BaseModel):
 class ServiceStatusResponse(BaseModel):
     prowlarr: dict
     qbittorrent: dict
+    sabnzbd: dict
     beets: dict
 
 
@@ -143,6 +149,10 @@ async def get_all_settings(
         qbittorrent_incomplete_path=cfg.get_setting("qbittorrent_incomplete_path", "/incomplete"),
         qbittorrent_completed_path=cfg.get_setting("qbittorrent_completed_path", "/media/completed"),
         qbittorrent_remove_completed=cfg.get_bool("qbittorrent_remove_completed"),
+        sabnzbd_enabled=cfg.get_bool("sabnzbd_enabled"),
+        sabnzbd_url=cfg.get_setting("sabnzbd_url"),
+        sabnzbd_api_key=cfg.get_setting("sabnzbd_api_key"),
+        sabnzbd_category=cfg.get_setting("sabnzbd_category", "music"),
         beets_enabled=cfg.get_bool("beets_enabled"),
         beets_config_path=cfg.get_setting("beets_config_path", "/config/beets/config.yaml"),
         beets_library_path=cfg.get_setting("beets_library_path", "/media/music"),
@@ -218,6 +228,14 @@ async def get_service_status(
         if qbit_connected:
             qbit_version = await download_client_service.get_version()
 
+    # SABnzbd
+    sab_connected = False
+    sab_version = None
+    if sabnzbd_service.is_configured:
+        sab_connected = await sabnzbd_service.test_connection()
+        if sab_connected:
+            sab_version = await sabnzbd_service.get_version()
+
     # Beets
     beets_info = await beets_service.test_connection()
 
@@ -239,6 +257,13 @@ async def get_service_status(
             "incomplete_path": cfg.get_setting("qbittorrent_incomplete_path"),
             "completed_path": cfg.get_setting("qbittorrent_completed_path"),
             "version": qbit_version,
+        },
+        sabnzbd={
+            "configured": sabnzbd_service.is_configured,
+            "connected": sab_connected,
+            "url": cfg.get_setting("sabnzbd_url"),
+            "category": cfg.get_setting("sabnzbd_category", "music"),
+            "version": sab_version,
         },
         beets=beets_info,
     )
@@ -266,6 +291,14 @@ async def test_service_connection(
             return {"connected": False, "reason": "qBittorrent URL not configured"}
         connected = await download_client_service.test_connection()
         version = await download_client_service.get_version() if connected else None
+        return {"connected": connected, "version": version}
+
+    elif service == "sabnzbd":
+        sabnzbd_service._client = None  # Reset cached client
+        if not sabnzbd_service.is_configured:
+            return {"connected": False, "reason": "SABnzbd URL or API key not configured"}
+        connected = await sabnzbd_service.test_connection()
+        version = await sabnzbd_service.get_version() if connected else None
         return {"connected": connected, "version": version}
 
     elif service == "beets":
@@ -523,6 +556,24 @@ async def delete_quality_profile(
     return {"status": "deleted", "id": profile_id}
 
 
+# --- SABnzbd Categories ---
+
+@router.get("/sabnzbd/categories")
+async def get_sabnzbd_categories(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Get categories from SABnzbd. Admin only."""
+    await cfg.ensure_cache(db)
+    if not sabnzbd_service.is_configured:
+        return {"categories": []}
+    categories = await sabnzbd_service.get_categories()
+    return {
+        "categories": categories,
+        "current_category": cfg.get_setting("sabnzbd_category", "music"),
+    }
+
+
 # --- Beets ---
 
 @router.get("/beets/config")
@@ -743,3 +794,5 @@ def _reinit_services():
 
     download_client_service._client = None
     download_client_service._authenticated = False
+
+    sabnzbd_service._client = None

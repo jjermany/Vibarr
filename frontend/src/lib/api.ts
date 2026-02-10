@@ -263,6 +263,13 @@ export interface ServiceStatus {
     completed_path?: string
     version?: string
   }
+  sabnzbd: {
+    configured: boolean
+    connected: boolean
+    url?: string
+    category?: string
+    version?: string
+  }
   beets: { available: boolean; version?: string; reason?: string }
 }
 
@@ -292,6 +299,10 @@ export interface GeneralSettings {
   qbittorrent_incomplete_path: string
   qbittorrent_completed_path: string
   qbittorrent_remove_completed: boolean
+  sabnzbd_enabled: boolean
+  sabnzbd_url: string
+  sabnzbd_api_key: string
+  sabnzbd_category: string
   beets_enabled: boolean
   beets_config_path: string
   beets_library_path: string
@@ -659,6 +670,7 @@ export const settingsApi = {
     api.get('/api/settings/beets/library', { params: { query } }),
   generateBeetsConfig: () => api.post('/api/settings/beets/generate-config'),
   getQbitCategories: () => api.get('/api/settings/qbittorrent/categories'),
+  getSabCategories: () => api.get('/api/settings/sabnzbd/categories'),
   updateQbitCategories: (data: { categories: string[]; default_category?: string }) =>
     api.put('/api/settings/qbittorrent/categories', data),
   importCompleted: () => api.post('/api/settings/downloads/import-completed'),
