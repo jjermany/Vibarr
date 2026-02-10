@@ -121,7 +121,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   }
 
   return (
-    <header className="h-16 bg-surface-900/80 backdrop-blur-sm border-b border-surface-800 flex items-center justify-between px-4 sm:px-6">
+    <header className="relative z-40 h-16 bg-surface-900/80 backdrop-blur-sm border-b border-surface-800 flex items-center justify-between px-4 sm:px-6">
       {/* Mobile menu button */}
       <button
         onClick={onMenuClick}

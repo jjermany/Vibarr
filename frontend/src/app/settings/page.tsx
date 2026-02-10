@@ -389,6 +389,14 @@ function ServicesTab() {
             reason={undefined}
           />
           <ServiceRow
+            name="SABnzbd"
+            description="Usenet download client"
+            configured={services?.sabnzbd?.configured || false}
+            connected={services?.sabnzbd?.connected || false}
+            extra={services?.sabnzbd?.version ? `v${services.sabnzbd.version}` : undefined}
+            reason={undefined}
+          />
+          <ServiceRow
             name="Beets"
             description="Music tagging and organization"
             configured={services?.beets?.available || false}
@@ -542,6 +550,68 @@ function ServicesTab() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* SABnzbd (Usenet) */}
+      <div className="card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-white">SABnzbd (Usenet)</h3>
+          <button
+            onClick={() => testMutation.mutate('sabnzbd')}
+            className="btn-ghost text-xs"
+            disabled={testMutation.isPending}
+          >
+            {testMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Test'}
+          </button>
+        </div>
+        <FieldToggle
+          label="Enable SABnzbd"
+          description="Use SABnzbd for usenet downloads alongside or instead of qBittorrent"
+          checked={form.sabnzbd_enabled === 'true'}
+          onChange={(v) => set('sabnzbd_enabled', String(v))}
+        />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FieldInput
+            label="SABnzbd URL"
+            value={form.sabnzbd_url || ''}
+            onChange={(v) => set('sabnzbd_url', v)}
+            placeholder="http://localhost:8080"
+          />
+          <FieldInput
+            label="API Key"
+            value={form.sabnzbd_api_key || ''}
+            onChange={(v) => set('sabnzbd_api_key', v)}
+            placeholder="Your SABnzbd API key"
+            type="password"
+          />
+        </div>
+        <FieldInput
+          label="Category"
+          description="SABnzbd category for music downloads. This category should point to your completed path (e.g. /media/complete/nzb)."
+          value={form.sabnzbd_category || ''}
+          onChange={(v) => set('sabnzbd_category', v)}
+          placeholder="music"
+        />
+        {services?.sabnzbd && (
+          <div className="pt-2 border-t border-surface-700 flex items-center gap-2 text-xs">
+            {services.sabnzbd.connected ? (
+              <>
+                <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                <span className="text-green-400">Connected</span>
+                {services.sabnzbd.version && (
+                  <span className="text-surface-400">v{services.sabnzbd.version}</span>
+                )}
+              </>
+            ) : services.sabnzbd.configured ? (
+              <>
+                <XCircle className="w-3.5 h-3.5 text-red-400" />
+                <span className="text-red-400">Not connected</span>
+              </>
+            ) : (
+              <span className="text-surface-500">Not configured</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Beets */}

@@ -58,6 +58,11 @@ DEFAULT_APP_SETTINGS = [
     {"key": "qbittorrent_incomplete_path", "value": "/incomplete", "category": "qbittorrent"},
     {"key": "qbittorrent_completed_path", "value": "/media/completed", "category": "qbittorrent"},
     {"key": "qbittorrent_remove_completed", "value": "false", "category": "qbittorrent"},
+    # SABnzbd
+    {"key": "sabnzbd_url", "value": "", "category": "sabnzbd"},
+    {"key": "sabnzbd_api_key", "value": "", "category": "sabnzbd"},
+    {"key": "sabnzbd_category", "value": "music", "category": "sabnzbd"},
+    {"key": "sabnzbd_enabled", "value": "false", "category": "sabnzbd"},
     # Beets
     {"key": "beets_enabled", "value": "false", "category": "beets"},
     {"key": "beets_config_path", "value": "/config/beets/config.yaml", "category": "beets"},
