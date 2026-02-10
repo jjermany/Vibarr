@@ -526,7 +526,7 @@ async def get_activity_feed(
             "album_id": a.album_id,
             "track_id": a.track_id,
             "playlist_id": a.playlist_id,
-            "metadata": a.metadata,
+            "metadata": a.extra_data,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         }
         for a in activities
@@ -566,7 +566,7 @@ async def get_global_activity(
             } if a.user_id in users else None,
             "activity_type": a.activity_type,
             "message": a.message,
-            "metadata": a.metadata,
+            "metadata": a.extra_data,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         }
         for a in activities

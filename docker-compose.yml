@@ -110,7 +110,7 @@ services:
       dockerfile: Dockerfile
     container_name: vibarr-frontend
     labels:
-      net.unraid.docker.icon: "/vibarr-icon.svg"
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/jjermany/Vibarr/main/icons/vibarr-icon.svg"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
     volumes:

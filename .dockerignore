@@ -28,4 +28,5 @@ docker-compose*.yml
 README.md
 LICENSE
 Logo and Icon
+icons
 *.md
