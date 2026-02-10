@@ -1,5 +1,6 @@
 """Wishlist endpoints."""
 
+from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -40,7 +41,7 @@ class WishlistItemResponse(BaseModel):
     source: str
     confidence_score: Optional[float] = None
     auto_download: bool
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True

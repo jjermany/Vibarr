@@ -50,9 +50,9 @@ class DownloadResponse(BaseModel):
     source: str = "manual"
     beets_imported: bool = False
     final_path: Optional[str] = None
-    created_at: str
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
