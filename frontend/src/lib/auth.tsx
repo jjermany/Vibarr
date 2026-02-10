@@ -35,6 +35,21 @@ export function useAuth() {
 
 const PUBLIC_PATHS = ['/login', '/setup']
 
+/** Retry fetching setup status with exponential backoff for when the backend isn't ready yet. */
+async function fetchSetupStatusWithRetry(maxRetries = 5): Promise<SetupStatus> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await authApi.getSetupStatus()
+      return res.data
+    } catch {
+      if (attempt === maxRetries) throw new Error('Backend unavailable')
+      // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+      await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)))
+    }
+  }
+  throw new Error('Backend unavailable')
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -65,9 +80,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function bootstrap() {
       try {
         // Always check setup status first (this endpoint is unauthenticated)
-        const statusRes = await authApi.getSetupStatus()
+        // Retry with backoff in case the backend isn't ready yet (e.g. fresh container start)
+        const status = await fetchSetupStatusWithRetry()
         if (cancelled) return
-        const status = statusRes.data
         setSetupStatus(status)
 
         // If setup is required, redirect to setup page
@@ -111,7 +126,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           router.replace('/login')
         }
       } catch {
-        // Network error during bootstrap - allow loading to finish
+        // Backend still unavailable after retries - stay on loading screen
+        // so we don't incorrectly redirect to login on a fresh install
+        return
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -132,7 +149,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    if (!setupStatus?.setup_required && !user && !PUBLIC_PATHS.includes(pathname)) {
+    // Only redirect to login when we have confirmed setup is complete
+    if (setupStatus && !setupStatus.setup_required && !user && !PUBLIC_PATHS.includes(pathname)) {
       router.replace('/login')
     }
   }, [pathname, user, loading, setupStatus, router])
