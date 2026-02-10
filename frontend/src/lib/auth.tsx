@@ -63,6 +63,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('vibarr_user', JSON.stringify(newUser))
     setToken(newToken)
     setUser(newUser)
+    // A successful login/setup means setup is complete — update the stale
+    // setupStatus so the route guard doesn't redirect back to /setup.
+    setSetupStatus((prev) => prev ? { ...prev, setup_required: false } : { setup_required: false, plex_configured: false, plex_auth_enabled: false })
   }, [])
 
   const logout = useCallback(() => {
