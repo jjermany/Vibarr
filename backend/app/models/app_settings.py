@@ -65,6 +65,8 @@ DEFAULT_APP_SETTINGS = [
     {"key": "beets_auto_import", "value": "true", "category": "beets"},
     {"key": "beets_move_files", "value": "true", "category": "beets"},
     {"key": "beets_hardlink", "value": "true", "category": "beets"},
+    # Storage limits
+    {"key": "storage_limit_gb", "value": "0", "category": "storage"},
     # Recommendation settings
     {"key": "recommendation_refresh_hours", "value": "24", "category": "general"},
     {"key": "new_release_check_hours", "value": "6", "category": "general"},

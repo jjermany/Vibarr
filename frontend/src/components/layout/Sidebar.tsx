@@ -18,6 +18,7 @@ import {
   User,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/lib/auth'
 
 const navigation = [
   { name: 'Home', href: '/', icon: Home },
@@ -40,6 +41,7 @@ export function Sidebar({
   onMobileClose?: () => void
 }) {
   const pathname = usePathname()
+  const { user } = useAuth()
 
   return (
     <>
@@ -107,22 +109,24 @@ export function Sidebar({
           </ul>
         </nav>
 
-        {/* Settings */}
-        <div className="p-3 border-t border-surface-800">
-          <Link
-            href="/settings"
-            onClick={onMobileClose}
-            className={cn(
-              'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-              pathname === '/settings'
-                ? 'bg-primary-500/20 text-primary-400'
-                : 'text-surface-400 hover:text-white hover:bg-surface-800'
-            )}
-          >
-            <Settings className="w-5 h-5" />
-            Settings
-          </Link>
-        </div>
+        {/* Settings - Admin only */}
+        {user?.is_admin && (
+          <div className="p-3 border-t border-surface-800">
+            <Link
+              href="/settings"
+              onClick={onMobileClose}
+              className={cn(
+                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                pathname === '/settings'
+                  ? 'bg-primary-500/20 text-primary-400'
+                  : 'text-surface-400 hover:text-white hover:bg-surface-800'
+              )}
+            >
+              <Settings className="w-5 h-5" />
+              Settings
+            </Link>
+          </div>
+        )}
       </aside>
     </>
   )

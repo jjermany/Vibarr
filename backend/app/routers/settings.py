@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.quality_profile import QualityProfile, DEFAULT_PROFILES
+from app.models.user import User
 from app.services.download_client import download_client_service
 from app.services.beets import beets_service
 from app.services import app_settings as cfg
+from app.services.auth import require_admin
 
 router = APIRouter()
 
@@ -64,6 +66,7 @@ class GeneralSettingsResponse(BaseModel):
     ml_profiling_enabled: bool = True
     taste_embedding_half_life_days: float = 21.0
     plex_auth_enabled: bool = False
+    storage_limit_gb: int = 0
 
 class SettingsUpdateRequest(BaseModel):
     settings: Dict[str, str]
@@ -117,8 +120,11 @@ class ServiceStatusResponse(BaseModel):
 # --- All Settings (read / write) ---
 
 @router.get("/general")
-async def get_all_settings(db: AsyncSession = Depends(get_db)):
-    """Get all user-configurable settings."""
+async def get_all_settings(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Get all user-configurable settings. Admin only."""
     await cfg.ensure_cache(db)
     return GeneralSettingsResponse(
         spotify_client_id=cfg.get_setting("spotify_client_id"),
@@ -155,6 +161,7 @@ async def get_all_settings(db: AsyncSession = Depends(get_db)):
         ml_profiling_enabled=cfg.get_bool("ml_profiling_enabled", True),
         taste_embedding_half_life_days=cfg.get_float("taste_embedding_half_life_days", 21.0),
         plex_auth_enabled=cfg.get_bool("plex_auth_enabled"),
+        storage_limit_gb=cfg.get_int("storage_limit_gb", 0),
     )
 
 
@@ -162,8 +169,9 @@ async def get_all_settings(db: AsyncSession = Depends(get_db)):
 async def update_all_settings(
     body: SettingsUpdateRequest,
     db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
 ):
-    """Update one or more user-configurable settings."""
+    """Update one or more user-configurable settings. Admin only."""
     await cfg.update_settings_bulk(db, body.settings)
     # Reinitialize services that cache connection details
     _reinit_services()
@@ -189,8 +197,11 @@ async def get_download_settings(db: AsyncSession = Depends(get_db)):
 # --- Service Status ---
 
 @router.get("/services", response_model=ServiceStatusResponse)
-async def get_service_status(db: AsyncSession = Depends(get_db)):
-    """Get status of all download-related services."""
+async def get_service_status(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Get status of all download-related services. Admin only."""
     await cfg.ensure_cache(db)
 
     # Prowlarr
@@ -237,8 +248,9 @@ async def get_service_status(db: AsyncSession = Depends(get_db)):
 async def test_service_connection(
     service: str,
     db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
 ):
-    """Test connection to a specific service after saving new settings."""
+    """Test connection to a specific service after saving new settings. Admin only."""
     await cfg.ensure_cache(db)
     _reinit_services()
 
@@ -266,8 +278,11 @@ async def test_service_connection(
 # --- qBittorrent Categories ---
 
 @router.get("/qbittorrent/categories")
-async def get_qbittorrent_categories(db: AsyncSession = Depends(get_db)):
-    """Get the configured qBittorrent categories."""
+async def get_qbittorrent_categories(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Get the configured qBittorrent categories. Admin only."""
     await cfg.ensure_cache(db)
     raw = cfg.get_setting("qbittorrent_categories", "vibarr,music")
     categories = [c.strip() for c in raw.split(",") if c.strip()]
@@ -282,8 +297,9 @@ async def get_qbittorrent_categories(db: AsyncSession = Depends(get_db)):
 async def update_qbittorrent_categories(
     body: Dict,
     db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
 ):
-    """Update qBittorrent categories and optionally sync them to qBit."""
+    """Update qBittorrent categories and optionally sync them to qBit. Admin only."""
     categories = body.get("categories", [])
     if isinstance(categories, list):
         cat_str = ",".join(c.strip() for c in categories if c.strip())
@@ -319,9 +335,12 @@ async def update_qbittorrent_categories(
 # --- Completed Download Import ---
 
 @router.post("/downloads/import-completed")
-async def import_completed_downloads(db: AsyncSession = Depends(get_db)):
+async def import_completed_downloads(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     """Scan the completed download path and trigger import for any
-    finished downloads that haven't been imported yet (Arr-style)."""
+    finished downloads that haven't been imported yet (Arr-style). Admin only."""
     await cfg.ensure_cache(db)
 
     completed_path = cfg.get_setting("qbittorrent_completed_path") or cfg.get_setting(
@@ -386,8 +405,11 @@ async def import_completed_downloads(db: AsyncSession = Depends(get_db)):
 # --- Quality Profiles ---
 
 @router.get("/quality-profiles", response_model=List[QualityProfileResponse])
-async def list_quality_profiles(db: AsyncSession = Depends(get_db)):
-    """List all quality profiles."""
+async def list_quality_profiles(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """List all quality profiles. Admin only."""
     result = await db.execute(
         select(QualityProfile).order_by(QualityProfile.is_default.desc(), QualityProfile.name)
     )
@@ -412,8 +434,9 @@ async def list_quality_profiles(db: AsyncSession = Depends(get_db)):
 async def create_quality_profile(
     data: QualityProfileCreate,
     db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
 ):
-    """Create a new quality profile."""
+    """Create a new quality profile. Admin only."""
     # Check for duplicate name
     existing = await db.execute(
         select(QualityProfile).where(QualityProfile.name == data.name)
@@ -437,8 +460,9 @@ async def create_quality_profile(
 async def get_quality_profile(
     profile_id: int,
     db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
 ):
-    """Get a specific quality profile."""
+    """Get a specific quality profile. Admin only."""
     result = await db.execute(
         select(QualityProfile).where(QualityProfile.id == profile_id)
     )
@@ -453,8 +477,9 @@ async def update_quality_profile(
     profile_id: int,
     data: QualityProfileUpdate,
     db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
 ):
-    """Update a quality profile."""
+    """Update a quality profile. Admin only."""
     result = await db.execute(
         select(QualityProfile).where(QualityProfile.id == profile_id)
     )
@@ -480,8 +505,9 @@ async def update_quality_profile(
 async def delete_quality_profile(
     profile_id: int,
     db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
 ):
-    """Delete a quality profile."""
+    """Delete a quality profile. Admin only."""
     result = await db.execute(
         select(QualityProfile).where(QualityProfile.id == profile_id)
     )
@@ -500,8 +526,11 @@ async def delete_quality_profile(
 # --- Beets ---
 
 @router.get("/beets/config")
-async def get_beets_config(db: AsyncSession = Depends(get_db)):
-    """Get current beets configuration."""
+async def get_beets_config(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Get current beets configuration. Admin only."""
     await cfg.ensure_cache(db)
     info = await beets_service.test_connection()
     return {
@@ -515,17 +544,83 @@ async def get_beets_config(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/beets/library")
-async def get_beets_library(query: Optional[str] = None, limit: int = 50):
-    """List albums in the beets library."""
+async def get_beets_library(
+    query: Optional[str] = None,
+    limit: int = 50,
+    admin: User = Depends(require_admin),
+):
+    """List albums in the beets library. Admin only."""
     albums = await beets_service.list_library(query=query, limit=limit)
     return {"albums": albums, "count": len(albums)}
 
 
 @router.post("/beets/generate-config")
-async def generate_beets_config():
-    """Generate a default beets config file."""
+async def generate_beets_config(admin: User = Depends(require_admin)):
+    """Generate a default beets config file. Admin only."""
     config = beets_service.generate_default_config()
     return {"config": config}
+
+
+# --- Storage Usage ---
+
+@router.get("/storage")
+async def get_storage_usage(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Get current storage usage for music library paths. Admin only."""
+    import shutil
+    from pathlib import Path
+
+    await cfg.ensure_cache(db)
+
+    library_path = cfg.get_setting("beets_library_path", "/media/music")
+    completed_path = cfg.get_setting("qbittorrent_completed_path", "/media/completed")
+    incomplete_path = cfg.get_setting("qbittorrent_incomplete_path", "/incomplete")
+    storage_limit_gb = cfg.get_int("storage_limit_gb", 0)
+
+    def _dir_size(path_str: str) -> int:
+        """Calculate total size of a directory in bytes."""
+        p = Path(path_str)
+        if not p.exists():
+            return 0
+        total = 0
+        try:
+            for f in p.rglob("*"):
+                if f.is_file():
+                    total += f.stat().st_size
+        except (PermissionError, OSError):
+            pass
+        return total
+
+    library_bytes = _dir_size(library_path)
+    completed_bytes = _dir_size(completed_path)
+    incomplete_bytes = _dir_size(incomplete_path)
+    total_bytes = library_bytes + completed_bytes + incomplete_bytes
+
+    # Disk info for the library path
+    disk_total = 0
+    disk_free = 0
+    try:
+        usage = shutil.disk_usage(library_path if Path(library_path).exists() else "/")
+        disk_total = usage.total
+        disk_free = usage.free
+    except (OSError, FileNotFoundError):
+        pass
+
+    limit_bytes = storage_limit_gb * 1024 * 1024 * 1024 if storage_limit_gb > 0 else 0
+
+    return {
+        "library_bytes": library_bytes,
+        "completed_bytes": completed_bytes,
+        "incomplete_bytes": incomplete_bytes,
+        "total_music_bytes": total_bytes,
+        "storage_limit_gb": storage_limit_gb,
+        "storage_limit_bytes": limit_bytes,
+        "limit_exceeded": limit_bytes > 0 and total_bytes >= limit_bytes,
+        "disk_total_bytes": disk_total,
+        "disk_free_bytes": disk_free,
+    }
 
 
 # --- Helpers ---
