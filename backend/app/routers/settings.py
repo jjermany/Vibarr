@@ -651,11 +651,21 @@ async def get_storage_usage(
     incomplete_bytes = _dir_size(incomplete_path)
     total_bytes = library_bytes + completed_bytes + incomplete_bytes
 
-    # Disk info for the library path
+    # Disk info — check the /media mount (the array) rather than the
+    # container root.  Walk up from the configured library path to find
+    # the first directory that actually exists so we measure the correct
+    # volume even before the library sub-directory has been created.
     disk_total = 0
     disk_free = 0
     try:
-        usage = shutil.disk_usage(library_path if Path(library_path).exists() else "/")
+        probe = Path(library_path)
+        while not probe.exists() and str(probe) != probe.root:
+            probe = probe.parent
+        # If nothing under /media exists yet, fall back to /media itself
+        # (the mounted array), NOT "/" (the small container rootfs).
+        if str(probe) == probe.root and Path("/media").exists():
+            probe = Path("/media")
+        usage = shutil.disk_usage(str(probe))
         disk_total = usage.total
         disk_free = usage.free
     except (OSError, FileNotFoundError):
