@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models.download import Download, DownloadStatus
 from app.services.prowlarr import prowlarr_service
 from app.services.download_client import download_client_service
+from app.services import app_settings as cfg
 
 router = APIRouter()
 settings = get_settings()
@@ -194,12 +195,47 @@ async def get_download_history(
     return downloads
 
 
+async def _check_storage_limit(db: AsyncSession) -> None:
+    """Raise 409 if the configured storage limit has been reached."""
+    await cfg.ensure_cache(db)
+    limit_gb = cfg.get_int("storage_limit_gb", 0)
+    if limit_gb <= 0:
+        return
+
+    from pathlib import Path
+
+    library_path = cfg.get_setting("beets_library_path", "/media/music")
+    completed_path = cfg.get_setting("qbittorrent_completed_path", "/media/completed")
+
+    total = 0
+    for dir_path in (library_path, completed_path):
+        p = Path(dir_path)
+        if p.exists():
+            try:
+                for f in p.rglob("*"):
+                    if f.is_file():
+                        total += f.stat().st_size
+            except (PermissionError, OSError):
+                pass
+
+    limit_bytes = limit_gb * 1024 * 1024 * 1024
+    if total >= limit_bytes:
+        used_gb = round(total / (1024 ** 3), 1)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Storage limit reached ({used_gb} GB used of {limit_gb} GB limit). "
+                   "Free up space or increase the limit in Settings.",
+        )
+
+
 @router.post("", response_model=DownloadResponse)
 async def create_download(
     request: DownloadRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Add item to download queue and begin searching."""
+    await _check_storage_limit(db)
+
     download = Download(
         album_id=request.album_id,
         wishlist_id=request.wishlist_id,
@@ -343,6 +379,8 @@ async def grab_release(
     db: AsyncSession = Depends(get_db),
 ):
     """Grab a specific release from search results and start downloading."""
+    await _check_storage_limit(db)
+
     if not prowlarr_service.is_available:
         raise HTTPException(status_code=503, detail="Prowlarr is not configured")
 

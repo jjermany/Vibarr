@@ -310,6 +310,19 @@ export interface GeneralSettings {
   ml_profiling_enabled: boolean
   taste_embedding_half_life_days: number
   plex_auth_enabled: boolean
+  storage_limit_gb: number
+}
+
+export interface StorageUsage {
+  library_bytes: number
+  completed_bytes: number
+  incomplete_bytes: number
+  total_music_bytes: number
+  storage_limit_gb: number
+  storage_limit_bytes: number
+  limit_exceeded: boolean
+  disk_total_bytes: number
+  disk_free_bytes: number
 }
 
 export interface LibraryStats {
@@ -628,6 +641,7 @@ export const settingsApi = {
   updateQbitCategories: (data: { categories: string[]; default_category?: string }) =>
     api.put('/api/settings/qbittorrent/categories', data),
   importCompleted: () => api.post('/api/settings/downloads/import-completed'),
+  getStorageUsage: () => api.get<StorageUsage>('/api/settings/storage'),
 }
 
 export const statsApi = {

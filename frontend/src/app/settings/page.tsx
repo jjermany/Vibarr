@@ -28,6 +28,7 @@ import {
   type QualityProfile,
   type ServiceStatus,
   type GeneralSettings,
+  type StorageUsage,
   type AppUser,
 } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
@@ -35,10 +36,24 @@ import { LoadingPage } from '@/components/ui/LoadingSpinner'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
-type Tab = 'services' | 'quality' | 'automation' | 'security'
+type Tab = 'services' | 'quality' | 'automation' | 'storage' | 'security'
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('services')
+  const { user } = useAuth()
+
+  // Redirect non-admin users
+  if (!user?.is_admin) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+        <Shield className="w-16 h-16 text-surface-600 mb-4" />
+        <h1 className="text-xl font-bold text-white mb-2">Admin Access Required</h1>
+        <p className="text-surface-400 max-w-md">
+          Settings are only available to administrators. Contact your server admin if you need configuration changes.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -51,18 +66,19 @@ export default function SettingsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-surface-800">
+      <div className="flex items-center gap-1 border-b border-surface-800 overflow-x-auto">
         {([
           { id: 'services' as Tab, label: 'Services', icon: Server },
           { id: 'quality' as Tab, label: 'Quality Profiles', icon: Music2 },
           { id: 'automation' as Tab, label: 'Automation', icon: Download },
+          { id: 'storage' as Tab, label: 'Storage', icon: HardDrive },
           { id: 'security' as Tab, label: 'Security', icon: Lock },
         ]).map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              'flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors',
+              'flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
               activeTab === tab.id
                 ? 'border-primary-500 text-primary-400'
                 : 'border-transparent text-surface-400 hover:text-white'
@@ -78,6 +94,7 @@ export default function SettingsPage() {
       {activeTab === 'services' && <ServicesTab />}
       {activeTab === 'quality' && <QualityProfilesTab />}
       {activeTab === 'automation' && <AutomationTab />}
+      {activeTab === 'storage' && <StorageTab />}
       {activeTab === 'security' && <SecurityTab />}
     </div>
   )
@@ -973,6 +990,190 @@ function AutomationTab() {
             <HardDrive className="w-4 h-4" />
           )}
           Scan &amp; Import Completed Downloads
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// --- Storage Tab ---
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`
+}
+
+function StorageTab() {
+  const queryClient = useQueryClient()
+
+  const { data: settingsData, isLoading: settingsLoading } = useQuery({
+    queryKey: ['general-settings'],
+    queryFn: () => settingsApi.getGeneral(),
+  })
+
+  const { data: storageData, isLoading: storageLoading } = useQuery({
+    queryKey: ['storage-usage'],
+    queryFn: () => settingsApi.getStorageUsage(),
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: (settings: Record<string, string>) =>
+      settingsApi.updateGeneral(settings),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['general-settings'] })
+      queryClient.invalidateQueries({ queryKey: ['storage-usage'] })
+      toast.success('Storage settings saved')
+    },
+    onError: () => toast.error('Failed to save storage settings'),
+  })
+
+  const [storageLimitGb, setStorageLimitGb] = useState('0')
+
+  useEffect(() => {
+    if (settingsData?.data) {
+      setStorageLimitGb(String(settingsData.data.storage_limit_gb ?? 0))
+    }
+  }, [settingsData])
+
+  if (settingsLoading) return <LoadingPage message="Loading storage settings..." />
+
+  const storage = storageData?.data as StorageUsage | undefined
+  const limitGb = parseInt(storageLimitGb) || 0
+  const limitBytes = limitGb * 1024 * 1024 * 1024
+  const usedBytes = storage?.total_music_bytes ?? 0
+  const usagePercent = limitBytes > 0 ? Math.min(100, (usedBytes / limitBytes) * 100) : 0
+
+  const handleSave = () => {
+    saveMutation.mutate({ storage_limit_gb: storageLimitGb })
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Storage Usage Overview */}
+      <div className="card p-6">
+        <h3 className="text-lg font-semibold text-white mb-4">
+          Storage Usage
+        </h3>
+        {storageLoading ? (
+          <div className="flex items-center gap-2 text-surface-400">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Calculating storage usage...
+          </div>
+        ) : storage ? (
+          <div className="space-y-4">
+            {/* Usage bar */}
+            {limitGb > 0 && (
+              <div>
+                <div className="flex items-center justify-between text-sm mb-2">
+                  <span className="text-surface-400">
+                    {formatBytes(usedBytes)} of {limitGb} GB used
+                  </span>
+                  <span className={cn(
+                    'font-medium',
+                    usagePercent >= 90 ? 'text-red-400' : usagePercent >= 75 ? 'text-yellow-400' : 'text-green-400'
+                  )}>
+                    {usagePercent.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="w-full h-3 bg-surface-700 rounded-full overflow-hidden">
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-all',
+                      usagePercent >= 90 ? 'bg-red-500' : usagePercent >= 75 ? 'bg-yellow-500' : 'bg-primary-500'
+                    )}
+                    style={{ width: `${usagePercent}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {storage.limit_exceeded && (
+              <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-red-300">
+                  <strong>Storage limit exceeded.</strong> New downloads will be blocked until
+                  space is freed or the limit is increased.
+                </p>
+              </div>
+            )}
+
+            {/* Breakdown */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 bg-surface-800/50 rounded-lg">
+                <div className="text-xs text-surface-400 mb-1">Music Library</div>
+                <div className="text-lg font-semibold text-white">
+                  {formatBytes(storage.library_bytes)}
+                </div>
+              </div>
+              <div className="p-4 bg-surface-800/50 rounded-lg">
+                <div className="text-xs text-surface-400 mb-1">Completed Downloads</div>
+                <div className="text-lg font-semibold text-white">
+                  {formatBytes(storage.completed_bytes)}
+                </div>
+              </div>
+              <div className="p-4 bg-surface-800/50 rounded-lg">
+                <div className="text-xs text-surface-400 mb-1">Active Downloads</div>
+                <div className="text-lg font-semibold text-white">
+                  {formatBytes(storage.incomplete_bytes)}
+                </div>
+              </div>
+            </div>
+
+            {/* Disk info */}
+            {storage.disk_total_bytes > 0 && (
+              <div className="text-xs text-surface-400 pt-2 border-t border-surface-700">
+                Disk: {formatBytes(storage.disk_free_bytes)} free of {formatBytes(storage.disk_total_bytes)} total
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-surface-400">Unable to retrieve storage information.</p>
+        )}
+      </div>
+
+      {/* Storage Limit Setting */}
+      <div className="card p-6 space-y-4">
+        <h3 className="text-lg font-semibold text-white">Storage Limit</h3>
+        <p className="text-sm text-surface-400">
+          Set a maximum amount of storage that can be used for music (library + downloads).
+          When the limit is reached, new downloads will be blocked. Set to 0 for unlimited.
+        </p>
+
+        <FieldInput
+          label="Storage Limit (GB)"
+          description="Maximum storage in gigabytes. 0 = unlimited."
+          value={storageLimitGb}
+          onChange={setStorageLimitGb}
+          type="number"
+          placeholder="0"
+        />
+
+        {limitGb > 0 && limitGb < 10 && (
+          <div className="flex items-start gap-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+            <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-yellow-300">
+              A storage limit below 10 GB is very low for a music library. FLAC albums
+              typically range from 200 MB to 1 GB each.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Save button */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saveMutation.isPending}
+          className="btn-primary flex items-center gap-2"
+        >
+          {saveMutation.isPending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Save className="w-4 h-4" />
+          )}
+          Save Storage Settings
         </button>
       </div>
     </div>
