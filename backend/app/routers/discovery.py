@@ -86,12 +86,14 @@ async def get_discovery_home(
             if artist:
                 item["artist_name"] = artist.name
                 item["image_url"] = artist.image_url
+                item["in_library"] = artist.in_library
         if rec.album_id:
             album = await db.execute(select(Album).where(Album.id == rec.album_id))
             album = album.scalar_one_or_none()
             if album:
                 item["title"] = album.title
                 item["image_url"] = album.cover_url or item.get("image_url")
+                item["in_library"] = album.in_library
         release_section_items.append(item)
 
     sections.append({
@@ -128,6 +130,7 @@ async def get_discovery_home(
                 item["name"] = artist.name
                 item["image_url"] = artist.image_url
                 item["genres"] = artist.genres or []
+                item["in_library"] = artist.in_library
         similar_section_items.append(item)
 
     sections.append({
@@ -163,6 +166,7 @@ async def get_discovery_home(
             if album:
                 item["title"] = album.title
                 item["image_url"] = album.cover_url
+                item["in_library"] = album.in_library
                 if album.artist:
                     item["artist_name"] = album.artist.name
         elif rec.artist_id:
@@ -171,6 +175,7 @@ async def get_discovery_home(
             if artist:
                 item["artist_name"] = artist.name
                 item["image_url"] = artist.image_url
+                item["in_library"] = artist.in_library
         deep_section_items.append(item)
 
     sections.append({
@@ -212,6 +217,7 @@ async def get_discovery_home(
                     "name": artist.name,
                     "image_url": artist.image_url,
                     "genres": artist.genres or [],
+                    "in_library": artist.in_library,
                 })
                 if len(genre_items) >= 10:
                     break
@@ -249,6 +255,7 @@ async def get_discovery_home(
             if artist:
                 item["name"] = artist.name
                 item["image_url"] = artist.image_url
+                item["in_library"] = artist.in_library
         discover_section_items.append(item)
 
     sections.insert(0, {
@@ -597,6 +604,7 @@ async def explore_mood(
             "valence": track.valence,
             "danceability": track.danceability,
             "tempo": track.tempo,
+            "in_library": track.in_library,
         })
 
         if track.album_id and track.album_id not in album_ids_seen:

@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { Search as SearchIcon, Music, Disc, User } from 'lucide-react'
+import { Search as SearchIcon, Music, Disc, User, Check } from 'lucide-react'
 import { searchApi } from '@/lib/api'
 import { AlbumCard } from '@/components/ui/AlbumCard'
 import { ArtistCard } from '@/components/ui/ArtistCard'
@@ -149,7 +149,14 @@ function SearchPageContent() {
                         {index + 1}
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-white truncate">{track.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-white truncate">{track.name || track.title}</p>
+                          {track.in_library && (
+                            <span className="flex-shrink-0 p-0.5 bg-green-500 rounded-full" title="In library">
+                              <Check className="w-2.5 h-2.5 text-white" />
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-surface-400 truncate">
                           {track.artist_name}
                         </p>
