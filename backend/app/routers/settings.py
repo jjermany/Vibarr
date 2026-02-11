@@ -193,7 +193,10 @@ async def update_all_settings(
 # --- Download Settings (convenience endpoint) ---
 
 @router.get("/download", response_model=DownloadSettingsResponse)
-async def get_download_settings(db: AsyncSession = Depends(get_db)):
+async def get_download_settings(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     """Get current download automation settings."""
     await cfg.ensure_cache(db)
     return DownloadSettingsResponse(
