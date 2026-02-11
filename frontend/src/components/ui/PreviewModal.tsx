@@ -115,7 +115,7 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
             {/* Basic info */}
             <div className="flex-1 min-w-0 flex flex-col justify-center">
               <span className="text-xs font-medium text-primary-400 uppercase tracking-wider mb-1">
-                {item.type} {item.source !== 'local' && `\u00b7 ${item.source}`}
+                {item.type} {item.source !== 'local' && `\u00b7 ${item.source === 'deezer' ? 'Deezer' : item.source === 'ytmusic' ? 'YouTube Music' : item.source}`}
               </span>
               <h2 className="text-xl font-bold text-white line-clamp-2">{item.name}</h2>
               {item.artist_name && (
@@ -217,7 +217,27 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                             </div>
                           )}
                         </div>
-                        <span className="text-xs text-surface-300 line-clamp-1">{album.title}</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-surface-300 line-clamp-1">{album.title}</span>
+                          {!item.in_library && (
+                            <button
+                              onClick={() => onAdd({
+                                id: `preview-album-${item.name}-${album.title}`,
+                                type: 'album',
+                                name: album.title,
+                                artist_name: item.name,
+                                image_url: album.image_url,
+                                source: item.source,
+                                in_library: false,
+                                external_ids: {},
+                              } as SearchResult)}
+                              className="p-1 text-surface-400 hover:text-white hover:bg-surface-700 rounded"
+                              title="Add album"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -247,6 +267,25 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                           <span className="text-xs text-surface-500">
                             {Math.floor(track.duration / 60000)}:{String(Math.floor((track.duration % 60000) / 1000)).padStart(2, '0')}
                           </span>
+                        )}
+                        {!item.in_library && (
+                          <button
+                            onClick={() => onAdd({
+                              id: `preview-track-${item.name}-${track.title}`,
+                              type: 'track',
+                              name: track.title,
+                              artist_name: item.type === 'artist' ? item.name : item.artist_name,
+                              album_name: item.type === 'album' ? item.name : undefined,
+                              image_url: item.image_url || preview?.image_url,
+                              source: item.source,
+                              in_library: false,
+                              external_ids: {},
+                            } as SearchResult)}
+                            className="p-1 text-surface-400 hover:text-white hover:bg-surface-700 rounded"
+                            title="Add track"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
                     ))}

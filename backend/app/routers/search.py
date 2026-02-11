@@ -6,14 +6,15 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Query, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.artist import Artist
 from app.models.album import Album
 from app.models.track import Track
-from app.services.spotify import spotify_service
+from app.services.deezer import deezer_service
+from app.services.ytmusic import ytmusic_service
 from app.services.lastfm import lastfm_service
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ router = APIRouter()
 
 class SearchResultItem(BaseModel):
     """Individual search result."""
+
     id: str
     type: str  # artist, album, track
     name: str
@@ -30,13 +32,14 @@ class SearchResultItem(BaseModel):
     album_name: Optional[str] = None
     image_url: Optional[str] = None
     year: Optional[int] = None
-    source: str  # local, spotify, musicbrainz, lastfm
+    source: str  # local, deezer, ytmusic, lastfm
     in_library: bool = False
     external_ids: dict = {}
 
 
 class SearchResponse(BaseModel):
     """Search response containing results from multiple sources."""
+
     query: str
     total: int
     artists: List[SearchResultItem] = []
@@ -46,6 +49,7 @@ class SearchResponse(BaseModel):
 
 class PreviewResponse(BaseModel):
     """Preview response for an item."""
+
     type: str
     name: str
     artist_name: Optional[str] = None
@@ -60,12 +64,16 @@ class PreviewResponse(BaseModel):
     url: Optional[str] = None
 
 
-async def _search_local_artists(db: AsyncSession, query: str, limit: int) -> List[SearchResultItem]:
+async def _search_local_artists(
+    db: AsyncSession, query: str, limit: int
+) -> List[SearchResultItem]:
     """Search local database for artists."""
     result = await db.execute(
         select(Artist)
         .where(Artist.name.ilike(f"%{query}%"))
-        .order_by(Artist.in_library.desc(), Artist.spotify_popularity.desc().nullslast())
+        .order_by(
+            Artist.in_library.desc(), Artist.spotify_popularity.desc().nullslast()
+        )
         .limit(limit)
     )
     artists = result.scalars().all()
@@ -78,17 +86,21 @@ async def _search_local_artists(db: AsyncSession, query: str, limit: int) -> Lis
             source="local",
             in_library=a.in_library,
             external_ids={
-                k: v for k, v in {
+                k: v
+                for k, v in {
                     "spotify_id": a.spotify_id,
                     "musicbrainz_id": a.musicbrainz_id,
-                }.items() if v
+                }.items()
+                if v
             },
         )
         for a in artists
     ]
 
 
-async def _search_local_albums(db: AsyncSession, query: str, limit: int, artist_filter: str = None) -> List[SearchResultItem]:
+async def _search_local_albums(
+    db: AsyncSession, query: str, limit: int, artist_filter: str = None
+) -> List[SearchResultItem]:
     """Search local database for albums."""
     q = select(Album).join(Artist, Album.artist_id == Artist.id)
     conditions = [Album.title.ilike(f"%{query}%")]
@@ -98,7 +110,9 @@ async def _search_local_albums(db: AsyncSession, query: str, limit: int, artist_
     else:
         q = q.where(Album.title.ilike(f"%{query}%"))
 
-    q = q.order_by(Album.in_library.desc(), Album.spotify_popularity.desc().nullslast()).limit(limit)
+    q = q.order_by(
+        Album.in_library.desc(), Album.spotify_popularity.desc().nullslast()
+    ).limit(limit)
     result = await db.execute(q)
     albums = result.scalars().all()
     return [
@@ -112,17 +126,21 @@ async def _search_local_albums(db: AsyncSession, query: str, limit: int, artist_
             source="local",
             in_library=a.in_library,
             external_ids={
-                k: v for k, v in {
+                k: v
+                for k, v in {
                     "spotify_id": a.spotify_id,
                     "musicbrainz_id": a.musicbrainz_id,
-                }.items() if v
+                }.items()
+                if v
             },
         )
         for a in albums
     ]
 
 
-async def _search_local_tracks(db: AsyncSession, query: str, limit: int) -> List[SearchResultItem]:
+async def _search_local_tracks(
+    db: AsyncSession, query: str, limit: int
+) -> List[SearchResultItem]:
     """Search local database for tracks."""
     result = await db.execute(
         select(Track)
@@ -143,87 +161,182 @@ async def _search_local_tracks(db: AsyncSession, query: str, limit: int) -> List
             source="local",
             in_library=t.in_library,
             external_ids={
-                k: v for k, v in {
+                k: v
+                for k, v in {
                     "spotify_id": t.spotify_id,
                     "musicbrainz_id": t.musicbrainz_id,
-                }.items() if v
+                }.items()
+                if v
             },
         )
         for t in tracks
     ]
 
 
-async def _search_spotify_artists(query: str, limit: int) -> List[SearchResultItem]:
-    """Search Spotify for artists."""
-    if not spotify_service.is_available:
-        return []
+async def _search_deezer_artists(query: str, limit: int) -> List[SearchResultItem]:
+    """Search Deezer for artists."""
     try:
-        results = await spotify_service.search_artists(query, limit=limit)
+        results = await deezer_service.search_artists(query, limit=limit)
         return [
             SearchResultItem(
-                id=f"spotify:{a['id']}",
+                id=f"deezer:{a['id']}",
                 type="artist",
                 name=a.get("name", ""),
-                image_url=a["images"][0]["url"] if a.get("images") else None,
-                source="spotify",
+                image_url=a.get("picture_xl")
+                or a.get("picture_big")
+                or a.get("picture"),
+                source="deezer",
                 in_library=False,
-                external_ids={"spotify_id": a["id"]},
+                external_ids={"deezer_id": str(a["id"])},
             )
             for a in results
         ]
     except Exception as e:
-        logger.error(f"Spotify artist search failed: {e}")
+        logger.error(f"Deezer artist search failed: {e}")
         return []
 
 
-async def _search_spotify_albums(query: str, limit: int) -> List[SearchResultItem]:
-    """Search Spotify for albums."""
-    if not spotify_service.is_available:
-        return []
+async def _search_deezer_albums(query: str, limit: int) -> List[SearchResultItem]:
+    """Search Deezer for albums."""
     try:
-        results = await spotify_service.search_albums(query, limit=limit)
+        results = await deezer_service.search_albums(query, limit=limit)
         return [
             SearchResultItem(
-                id=f"spotify:{a['id']}",
+                id=f"deezer:{a['id']}",
                 type="album",
-                name=a.get("name", ""),
-                artist_name=a["artists"][0]["name"] if a.get("artists") else None,
-                image_url=a["images"][0]["url"] if a.get("images") else None,
-                year=int(a["release_date"][:4]) if a.get("release_date") else None,
-                source="spotify",
+                name=a.get("title", ""),
+                artist_name=a.get("artist", {}).get("name"),
+                image_url=a.get("cover_xl") or a.get("cover_big") or a.get("cover"),
+                year=(
+                    int(a["release_date"][:4])
+                    if a.get("release_date") and len(a["release_date"]) >= 4
+                    else None
+                ),
+                source="deezer",
                 in_library=False,
-                external_ids={"spotify_id": a["id"]},
+                external_ids={"deezer_id": str(a["id"])},
             )
             for a in results
         ]
     except Exception as e:
-        logger.error(f"Spotify album search failed: {e}")
+        logger.error(f"Deezer album search failed: {e}")
         return []
 
 
-async def _search_spotify_tracks(query: str, limit: int) -> List[SearchResultItem]:
-    """Search Spotify for tracks."""
-    if not spotify_service.is_available:
-        return []
+async def _search_deezer_tracks(query: str, limit: int) -> List[SearchResultItem]:
+    """Search Deezer for tracks."""
     try:
-        results = await spotify_service.search_tracks(query, limit=limit)
+        results = await deezer_service.search_tracks(query, limit=limit)
         return [
             SearchResultItem(
-                id=f"spotify:{t['id']}",
+                id=f"deezer:{t['id']}",
                 type="track",
-                name=t.get("name", ""),
-                artist_name=t["artists"][0]["name"] if t.get("artists") else None,
-                album_name=t["album"]["name"] if t.get("album") else None,
-                image_url=t["album"]["images"][0]["url"] if t.get("album", {}).get("images") else None,
-                source="spotify",
+                name=t.get("title", ""),
+                artist_name=t.get("artist", {}).get("name"),
+                album_name=t.get("album", {}).get("title"),
+                image_url=t.get("album", {}).get("cover_xl")
+                or t.get("album", {}).get("cover_big")
+                or t.get("album", {}).get("cover"),
+                source="deezer",
                 in_library=False,
-                external_ids={"spotify_id": t["id"]},
+                external_ids={
+                    "deezer_id": str(t["id"]),
+                    "deezer_artist_id": (
+                        str(t.get("artist", {}).get("id"))
+                        if t.get("artist", {}).get("id")
+                        else ""
+                    ),
+                },
             )
             for t in results
         ]
     except Exception as e:
-        logger.error(f"Spotify track search failed: {e}")
+        logger.error(f"Deezer track search failed: {e}")
         return []
+
+
+async def _search_ytmusic_artists(query: str, limit: int) -> List[SearchResultItem]:
+    """Fallback artist search via YouTube Music."""
+    if not ytmusic_service.is_available:
+        return []
+    results = await ytmusic_service.search_artists(query, limit=limit)
+    return [
+        SearchResultItem(
+            id=f"ytmusic:{a.get('browseId') or a.get('channelId') or a.get('artistId') or a.get('name')}",
+            type="artist",
+            name=a.get("artist") or a.get("name", ""),
+            image_url=(
+                (a.get("thumbnails") or [{}])[-1].get("url")
+                if a.get("thumbnails")
+                else None
+            ),
+            source="ytmusic",
+            in_library=False,
+            external_ids={
+                "ytmusic_browse_id": a.get("browseId") or a.get("channelId") or ""
+            },
+        )
+        for a in results
+    ]
+
+
+async def _search_ytmusic_albums(query: str, limit: int) -> List[SearchResultItem]:
+    """Fallback album search via YouTube Music."""
+    if not ytmusic_service.is_available:
+        return []
+    results = await ytmusic_service.search_albums(query, limit=limit)
+    return [
+        SearchResultItem(
+            id=f"ytmusic:{a.get('browseId') or a.get('playlistId') or a.get('title')}",
+            type="album",
+            name=a.get("title", ""),
+            artist_name=(
+                (a.get("artists") or [{}])[0].get("name") if a.get("artists") else None
+            ),
+            image_url=(
+                (a.get("thumbnails") or [{}])[-1].get("url")
+                if a.get("thumbnails")
+                else None
+            ),
+            source="ytmusic",
+            in_library=False,
+            external_ids={"ytmusic_browse_id": a.get("browseId") or ""},
+        )
+        for a in results
+    ]
+
+
+async def _search_ytmusic_tracks(query: str, limit: int) -> List[SearchResultItem]:
+    """Fallback track search via YouTube Music."""
+    if not ytmusic_service.is_available:
+        return []
+    results = await ytmusic_service.search_tracks(query, limit=limit)
+    return [
+        SearchResultItem(
+            id=f"ytmusic:{t.get('videoId') or t.get('browseId') or t.get('title')}",
+            type="track",
+            name=t.get("title", ""),
+            artist_name=(
+                (t.get("artists") or [{}])[0].get("name")
+                if t.get("artists")
+                else t.get("artist")
+            ),
+            album_name=(
+                t.get("album", {}).get("name")
+                if isinstance(t.get("album"), dict)
+                else None
+            ),
+            image_url=(
+                (t.get("thumbnails") or [{}])[-1].get("url")
+                if t.get("thumbnails")
+                else None
+            ),
+            source="ytmusic",
+            in_library=False,
+            external_ids={"ytmusic_video_id": t.get("videoId") or ""},
+        )
+        for t in results
+    ]
 
 
 async def _search_lastfm_artists(query: str, limit: int) -> List[SearchResultItem]:
@@ -316,25 +429,31 @@ def _deduplicate_results(results: List[SearchResultItem]) -> List[SearchResultIt
 @router.get("", response_model=SearchResponse)
 async def search(
     q: str = Query(..., min_length=1, description="Search query"),
-    type: Optional[str] = Query(None, description="Filter by type: artist, album, track"),
-    source: Optional[str] = Query(None, description="Search specific source: local, spotify, musicbrainz"),
+    type: Optional[str] = Query(
+        None, description="Filter by type: artist, album, track"
+    ),
+    source: Optional[str] = Query(
+        None, description="Search specific source: local, deezer, ytmusic, lastfm"
+    ),
     limit: int = Query(20, ge=1, le=100, description="Maximum results per type"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Search for artists, albums, and tracks across all sources.
+        Search for artists, albums, and tracks across all sources.
 
-    Results are aggregated from:
-    - Local database (your library)
-    - Spotify
-    - Last.fm
+        Results are aggregated from:
+        - Local database (your library)
+        - Deezer (primary)
+    - YouTube Music (fallback)
+        - Last.fm
     """
     artists: List[SearchResultItem] = []
     albums: List[SearchResultItem] = []
     tracks: List[SearchResultItem] = []
 
     search_local = source is None or source == "local"
-    search_spotify = source is None or source == "spotify"
+    search_deezer = source is None or source == "deezer"
+    search_ytmusic = source == "ytmusic"
     search_lastfm = source is None or source == "lastfm"
 
     # Run searches in parallel
@@ -343,24 +462,30 @@ async def search(
     if not type or type == "artist":
         if search_local:
             tasks.append(("local_artists", _search_local_artists(db, q, limit)))
-        if search_spotify:
-            tasks.append(("spotify_artists", _search_spotify_artists(q, limit)))
+        if search_deezer:
+            tasks.append(("deezer_artists", _search_deezer_artists(q, limit)))
+        if search_ytmusic:
+            tasks.append(("ytmusic_artists", _search_ytmusic_artists(q, limit)))
         if search_lastfm:
             tasks.append(("lastfm_artists", _search_lastfm_artists(q, limit)))
 
     if not type or type == "album":
         if search_local:
             tasks.append(("local_albums", _search_local_albums(db, q, limit)))
-        if search_spotify:
-            tasks.append(("spotify_albums", _search_spotify_albums(q, limit)))
+        if search_deezer:
+            tasks.append(("deezer_albums", _search_deezer_albums(q, limit)))
+        if search_ytmusic:
+            tasks.append(("ytmusic_albums", _search_ytmusic_albums(q, limit)))
         if search_lastfm:
             tasks.append(("lastfm_albums", _search_lastfm_albums(q, limit)))
 
     if not type or type == "track":
         if search_local:
             tasks.append(("local_tracks", _search_local_tracks(db, q, limit)))
-        if search_spotify:
-            tasks.append(("spotify_tracks", _search_spotify_tracks(q, limit)))
+        if search_deezer:
+            tasks.append(("deezer_tracks", _search_deezer_tracks(q, limit)))
+        if search_ytmusic:
+            tasks.append(("ytmusic_tracks", _search_ytmusic_tracks(q, limit)))
         if search_lastfm:
             tasks.append(("lastfm_tracks", _search_lastfm_tracks(q, limit)))
 
@@ -380,6 +505,15 @@ async def search(
             albums.extend(result)
         elif "tracks" in name:
             tracks.extend(result)
+
+    # Tiered fallback: only use YouTube Music if Deezer/local/Last.fm gave no results for a type.
+    if source is None:
+        if (not type or type == "artist") and not artists:
+            artists.extend(await _search_ytmusic_artists(q, limit))
+        if (not type or type == "album") and not albums:
+            albums.extend(await _search_ytmusic_albums(q, limit))
+        if (not type or type == "track") and not tracks:
+            tracks.extend(await _search_ytmusic_tracks(q, limit))
 
     # Deduplicate
     artists = _deduplicate_results(artists)[:limit]
@@ -401,8 +535,12 @@ async def search(
 async def get_preview(
     type: str = Query(..., description="Item type: artist, album"),
     name: str = Query(..., description="Item name (artist name or album title)"),
-    artist: Optional[str] = Query(None, description="Artist name (required for album preview)"),
-    source: str = Query("lastfm", description="Data source: local, lastfm"),
+    artist: Optional[str] = Query(
+        None, description="Artist name (required for album preview)"
+    ),
+    source: str = Query(
+        "lastfm", description="Data source: local, deezer, ytmusic, lastfm"
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -456,7 +594,10 @@ async def get_preview(
                 tracks_result = await db.execute(
                     select(Track)
                     .where(Track.album_id == album_obj.id)
-                    .order_by(Track.disc_number.asc().nullslast(), Track.track_number.asc().nullslast())
+                    .order_by(
+                        Track.disc_number.asc().nullslast(),
+                        Track.track_number.asc().nullslast(),
+                    )
                 )
                 tracks = tracks_result.scalars().all()
                 return PreviewResponse(
@@ -474,6 +615,115 @@ async def get_preview(
                         for t in tracks
                     ],
                     source="local",
+                )
+
+    if source == "deezer":
+        if type == "artist":
+            matches = await deezer_service.search_artists(name, limit=1)
+            if matches:
+                artist_data = matches[0]
+                artist_id = artist_data.get("id")
+                top_albums = (
+                    await deezer_service.get_artist_albums(artist_id, limit=8)
+                    if artist_id
+                    else []
+                )
+                top_tracks = (
+                    await deezer_service.get_artist_top_tracks(artist_id, limit=12)
+                    if artist_id
+                    else []
+                )
+                return PreviewResponse(
+                    type="artist",
+                    name=artist_data.get("name", name),
+                    image_url=artist_data.get("picture_xl")
+                    or artist_data.get("picture_big")
+                    or artist_data.get("picture"),
+                    tags=[],
+                    top_albums=[
+                        {
+                            "title": album.get("title"),
+                            "image_url": album.get("cover_xl")
+                            or album.get("cover_big")
+                            or album.get("cover"),
+                            "release_year": (
+                                int(album["release_date"][:4])
+                                if album.get("release_date")
+                                else None
+                            ),
+                        }
+                        for album in top_albums
+                    ],
+                    tracks=[
+                        {
+                            "title": track.get("title"),
+                            "duration": (track.get("duration") or 0) * 1000,
+                            "track_number": track.get("track_position"),
+                        }
+                        for track in top_tracks
+                    ],
+                    source="deezer",
+                    url=artist_data.get("link"),
+                )
+        elif type == "album":
+            query = f"{artist} {name}" if artist else name
+            matches = await deezer_service.search_albums(query, limit=1)
+            if matches:
+                album_data = matches[0]
+                return PreviewResponse(
+                    type="album",
+                    name=album_data.get("title", name),
+                    artist_name=(
+                        album_data.get("artist", {}).get("name")
+                        if album_data.get("artist")
+                        else artist
+                    ),
+                    image_url=album_data.get("cover_xl")
+                    or album_data.get("cover_big")
+                    or album_data.get("cover"),
+                    tags=[],
+                    tracks=[],
+                    source="deezer",
+                    url=album_data.get("link"),
+                )
+
+    if source == "ytmusic":
+        if type == "artist":
+            matches = await ytmusic_service.search_artists(name, limit=1)
+            if matches:
+                first = matches[0]
+                artist_name = first.get("artist") or first.get("name", name)
+                return PreviewResponse(
+                    type="artist",
+                    name=artist_name,
+                    image_url=(
+                        (first.get("thumbnails") or [{}])[-1].get("url")
+                        if first.get("thumbnails")
+                        else None
+                    ),
+                    tags=[],
+                    source="ytmusic",
+                )
+        elif type == "album":
+            query = f"{artist} {name}" if artist else name
+            matches = await ytmusic_service.search_albums(query, limit=1)
+            if matches:
+                first = matches[0]
+                return PreviewResponse(
+                    type="album",
+                    name=first.get("title", name),
+                    artist_name=(
+                        (first.get("artists") or [{}])[0].get("name")
+                        if first.get("artists")
+                        else artist
+                    ),
+                    image_url=(
+                        (first.get("thumbnails") or [{}])[-1].get("url")
+                        if first.get("thumbnails")
+                        else None
+                    ),
+                    tags=[],
+                    source="ytmusic",
                 )
 
     # Last.fm preview
@@ -519,15 +769,18 @@ async def search_artists(
     db: AsyncSession = Depends(get_db),
 ):
     """Search for artists only."""
-    local_results, spotify_results, lastfm_results = await asyncio.gather(
-        _search_local_artists(db, q, limit),
-        _search_spotify_artists(q, limit),
-        _search_lastfm_artists(q, limit),
-        return_exceptions=True,
+    local_results, deezer_results, ytmusic_results, lastfm_results = (
+        await asyncio.gather(
+            _search_local_artists(db, q, limit),
+            _search_deezer_artists(q, limit),
+            _search_ytmusic_artists(q, limit),
+            _search_lastfm_artists(q, limit),
+            return_exceptions=True,
+        )
     )
 
     artists = []
-    for result in [local_results, spotify_results, lastfm_results]:
+    for result in [local_results, deezer_results, ytmusic_results, lastfm_results]:
         if isinstance(result, list):
             artists.extend(result)
 
@@ -545,15 +798,18 @@ async def search_albums(
     """Search for albums only."""
     search_query = f"{artist} {q}" if artist else q
 
-    local_results, spotify_results, lastfm_results = await asyncio.gather(
-        _search_local_albums(db, q, limit, artist_filter=artist),
-        _search_spotify_albums(search_query, limit),
-        _search_lastfm_albums(search_query, limit),
-        return_exceptions=True,
+    local_results, deezer_results, ytmusic_results, lastfm_results = (
+        await asyncio.gather(
+            _search_local_albums(db, q, limit, artist_filter=artist),
+            _search_deezer_albums(search_query, limit),
+            _search_ytmusic_albums(search_query, limit),
+            _search_lastfm_albums(search_query, limit),
+            return_exceptions=True,
+        )
     )
 
     albums = []
-    for result in [local_results, spotify_results, lastfm_results]:
+    for result in [local_results, deezer_results, ytmusic_results, lastfm_results]:
         if isinstance(result, list):
             albums.extend(result)
 
@@ -577,15 +833,18 @@ async def search_tracks(
         search_parts.append(album)
     search_query = " ".join(search_parts)
 
-    local_results, spotify_results, lastfm_results = await asyncio.gather(
-        _search_local_tracks(db, q, limit),
-        _search_spotify_tracks(search_query, limit),
-        _search_lastfm_tracks(search_query, limit),
-        return_exceptions=True,
+    local_results, deezer_results, ytmusic_results, lastfm_results = (
+        await asyncio.gather(
+            _search_local_tracks(db, q, limit),
+            _search_deezer_tracks(search_query, limit),
+            _search_ytmusic_tracks(search_query, limit),
+            _search_lastfm_tracks(search_query, limit),
+            return_exceptions=True,
+        )
     )
 
     tracks = []
-    for result in [local_results, spotify_results, lastfm_results]:
+    for result in [local_results, deezer_results, ytmusic_results, lastfm_results]:
         if isinstance(result, list):
             tracks.extend(result)
 

@@ -59,14 +59,15 @@ function SearchPageContent() {
   const handleAdd = useCallback(async (item: SearchResult) => {
     try {
       const isAlbum = item.type === 'album'
+      const isTrack = item.type === 'track'
       await wishlistApi.create({
-        item_type: isAlbum ? 'album' : 'artist',
-        artist_name: item.artist_name || (isAlbum ? undefined : item.name),
-        album_title: isAlbum ? item.name : undefined,
-        spotify_id: item.external_ids?.spotify_id,
+        item_type: isAlbum ? 'album' : isTrack ? 'track' : 'artist',
+        artist_name: item.artist_name || ((isAlbum || isTrack) ? undefined : item.name),
+        album_title: isAlbum ? item.name : isTrack ? `${item.name}${item.album_name ? ` · ${item.album_name}` : ''}` : undefined,
         musicbrainz_id: item.external_ids?.musicbrainz_id,
         priority: 'normal',
         auto_download: false,
+        notes: isTrack ? 'Track request from discover/search' : undefined,
       })
       toast.success(`Added "${item.name}" to wishlist`)
       setPreviewItem(null)
@@ -121,7 +122,7 @@ function SearchPageContent() {
         <EmptyState
           icon={<SearchIcon className="w-8 h-8" />}
           title="Search for music"
-          description="Find artists, albums, and tracks across your library and external sources"
+          description="Find artists, albums, and tracks across your library plus Deezer (primary) with YouTube Music fallback"
         />
       ) : isLoading ? (
         <div className="flex items-center justify-center py-16">
