@@ -8,7 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.album import Album
+from app.models.artist import Artist
 from app.models.wishlist import WishlistItem, WishlistStatus, WishlistPriority
+from app.services.prowlarr import prowlarr_service
 
 router = APIRouter()
 
@@ -40,6 +43,7 @@ class WishlistItemResponse(BaseModel):
     priority: WishlistPriority
     source: str
     confidence_score: Optional[float] = None
+    image_url: Optional[str] = None
     auto_download: bool
     created_at: datetime
 
@@ -67,7 +71,11 @@ async def get_wishlist(
     db: AsyncSession = Depends(get_db),
 ):
     """Get wishlist items."""
-    query = select(WishlistItem)
+    query = (
+        select(WishlistItem, Album.cover_url, Artist.image_url)
+        .outerjoin(Album, WishlistItem.album_id == Album.id)
+        .outerjoin(Artist, WishlistItem.artist_id == Artist.id)
+    )
 
     if status:
         query = query.where(WishlistItem.status == status)
@@ -88,9 +96,17 @@ async def get_wishlist(
     query = query.offset(offset).limit(limit)
 
     result = await db.execute(query)
-    items = result.scalars().all()
+    rows = result.all()
 
-    return items
+    return [
+        WishlistItemResponse.model_validate(
+            {
+                **_wishlist_item_to_dict(item),
+                "image_url": album_cover_url or artist_image_url,
+            }
+        )
+        for item, album_cover_url, artist_image_url in rows
+    ]
 
 
 @router.post("", response_model=WishlistItemResponse)
@@ -118,7 +134,12 @@ async def add_to_wishlist(
     await db.commit()
     await db.refresh(wishlist_item)
 
-    return wishlist_item
+    return WishlistItemResponse.model_validate(
+        {
+            **_wishlist_item_to_dict(wishlist_item),
+            "image_url": None,
+        }
+    )
 
 
 @router.get("/{item_id}", response_model=WishlistItemResponse)
@@ -127,13 +148,24 @@ async def get_wishlist_item(
     db: AsyncSession = Depends(get_db),
 ):
     """Get wishlist item by ID."""
-    result = await db.execute(select(WishlistItem).where(WishlistItem.id == item_id))
-    item = result.scalar_one_or_none()
+    result = await db.execute(
+        select(WishlistItem, Album.cover_url, Artist.image_url)
+        .outerjoin(Album, WishlistItem.album_id == Album.id)
+        .outerjoin(Artist, WishlistItem.artist_id == Artist.id)
+        .where(WishlistItem.id == item_id)
+    )
+    row = result.one_or_none()
 
-    if not item:
+    if not row:
         raise HTTPException(status_code=404, detail="Wishlist item not found")
 
-    return item
+    item, album_cover_url, artist_image_url = row
+    return WishlistItemResponse.model_validate(
+        {
+            **_wishlist_item_to_dict(item),
+            "image_url": album_cover_url or artist_image_url,
+        }
+    )
 
 
 @router.patch("/{item_id}", response_model=WishlistItemResponse)
@@ -163,7 +195,12 @@ async def update_wishlist_item(
     await db.commit()
     await db.refresh(item)
 
-    return item
+    return WishlistItemResponse.model_validate(
+        {
+            **_wishlist_item_to_dict(item),
+            "image_url": await _resolve_item_image(db, item),
+        }
+    )
 
 
 @router.delete("/{item_id}")
@@ -196,9 +233,11 @@ async def search_wishlist_item(
     if not item:
         raise HTTPException(status_code=404, detail="Wishlist item not found")
 
-    # Update status to searching
-    item.status = WishlistStatus.SEARCHING
-    await db.commit()
+    if not prowlarr_service.is_available:
+        raise HTTPException(
+            status_code=503,
+            detail="Search is unavailable until Prowlarr is configured and reachable",
+        )
 
     # Queue Celery task to search Prowlarr
     from app.tasks.downloads import search_wishlist_item as search_task
@@ -214,6 +253,12 @@ async def search_all_wishlist(
     """Search for all wanted wishlist items."""
     from app.tasks.downloads import process_wishlist
 
+    if not prowlarr_service.is_available:
+        raise HTTPException(
+            status_code=503,
+            detail="Search is unavailable until Prowlarr is configured and reachable",
+        )
+
     # Count items to search
     result = await db.execute(
         select(WishlistItem)
@@ -224,3 +269,40 @@ async def search_all_wishlist(
     process_wishlist.delay()
 
     return {"status": "search_all_queued", "items_to_search": len(items)}
+
+
+def _wishlist_item_to_dict(item: WishlistItem) -> dict:
+    """Convert a wishlist ORM object into a response-compatible dict."""
+    return {
+        "id": item.id,
+        "item_type": item.item_type,
+        "artist_id": item.artist_id,
+        "album_id": item.album_id,
+        "artist_name": item.artist_name,
+        "album_title": item.album_title,
+        "status": item.status,
+        "priority": item.priority,
+        "source": item.source,
+        "confidence_score": item.confidence_score,
+        "auto_download": item.auto_download,
+        "created_at": item.created_at,
+    }
+
+
+async def _resolve_item_image(db: AsyncSession, item: WishlistItem) -> Optional[str]:
+    """Resolve artwork URL for a wishlist item from album or artist records."""
+    if item.album_id:
+        album_result = await db.execute(
+            select(Album.cover_url).where(Album.id == item.album_id)
+        )
+        album_cover_url = album_result.scalar_one_or_none()
+        if album_cover_url:
+            return album_cover_url
+
+    if item.artist_id:
+        artist_result = await db.execute(
+            select(Artist.image_url).where(Artist.id == item.artist_id)
+        )
+        return artist_result.scalar_one_or_none()
+
+    return None
