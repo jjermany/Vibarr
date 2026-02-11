@@ -4,6 +4,10 @@ set -e
 PG_BIN=/usr/lib/postgresql/15/bin
 PG_DATA=/config/postgresql
 
+# Ensure /config is traversable for service users (postgres/redis)
+mkdir -p /config
+chmod 755 /config
+
 # ── Auto-generate secret key if not provided ──
 if [ -z "$SECRET_KEY" ] || [ "$SECRET_KEY" = "change-me-in-production" ]; then
     if [ -f /config/.secret_key ]; then
@@ -46,7 +50,11 @@ fi
 
 # ── Ensure directories and permissions ──
 mkdir -p /config/redis /var/run/postgresql
-chown postgres:postgres "$PG_DATA" /var/run/postgresql
+chown -R postgres:postgres "$PG_DATA"
+chmod 700 "$PG_DATA"
+[ -f "$PG_DATA/postgresql.conf" ] && chmod 600 "$PG_DATA/postgresql.conf"
+[ -f "$PG_DATA/pg_hba.conf" ] && chmod 600 "$PG_DATA/pg_hba.conf"
+chown postgres:postgres /var/run/postgresql
 chown redis:redis /config/redis
 
 exec supervisord -c /etc/supervisor/conf.d/supervisord.conf
