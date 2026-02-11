@@ -14,7 +14,7 @@ import {
   Headphones,
   TrendingUp,
 } from 'lucide-react'
-import { discoveryApi, libraryApi, statsApi, wishlistApi } from '@/lib/api'
+import { discoveryApi, libraryApi, statsApi, wishlistApi, healthApi } from '@/lib/api'
 import type { SearchResult } from '@/lib/api'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { AlbumCard } from '@/components/ui/AlbumCard'
@@ -27,24 +27,40 @@ import toast from 'react-hot-toast'
 export function DiscoveryHome() {
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
 
+  const { data: readinessData } = useQuery({
+    queryKey: ['backend-readiness'],
+    queryFn: () => healthApi.readiness(),
+    retry: false,
+    refetchInterval: (query) => {
+      const status = query.state.data?.data?.status
+      return status === 'ready' ? false : 3000
+    },
+  })
+
+  const backendReady = readinessData?.data?.status === 'ready'
+
   const { data: discoveryData, isLoading: discoveryLoading } = useQuery({
     queryKey: ['discovery', 'home'],
     queryFn: () => discoveryApi.getHome(),
+    enabled: backendReady,
   })
 
   const { data: recentData, isLoading: recentLoading } = useQuery({
     queryKey: ['library', 'recent'],
     queryFn: () => libraryApi.getRecent(10),
+    enabled: backendReady,
   })
 
   const { data: streakData } = useQuery({
     queryKey: ['stats', 'streak'],
     queryFn: () => statsApi.streak(),
+    enabled: backendReady,
   })
 
   const { data: overviewData } = useQuery({
     queryKey: ['stats', 'overview', 7],
     queryFn: () => statsApi.overview(7),
+    enabled: backendReady,
   })
 
   const handlePreview = useCallback((item: any) => {
@@ -79,6 +95,10 @@ export function DiscoveryHome() {
       toast.error(err?.response?.data?.detail || 'Failed to add to wishlist')
     }
   }, [])
+
+  if (!backendReady) {
+    return <LoadingPage message="Starting up Vibarr services..." />
+  }
 
   if (discoveryLoading || recentLoading) {
     return <LoadingPage message="Loading your personalized feed..." />

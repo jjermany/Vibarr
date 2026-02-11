@@ -16,6 +16,13 @@ import toast from 'react-hot-toast'
 
 type SearchType = 'all' | 'artists' | 'albums' | 'tracks'
 
+const SEARCH_TYPE_TO_API: Record<SearchType, string | undefined> = {
+  all: undefined,
+  artists: 'artist',
+  albums: 'album',
+  tracks: 'track',
+}
+
 export default function SearchPage() {
   return (
     <Suspense fallback={<div className="flex items-center justify-center py-16"><LoadingSpinner size="lg" /></div>}>
@@ -43,7 +50,7 @@ function SearchPageContent() {
   const { data: readinessData, isLoading: readinessLoading } = useQuery({
     queryKey: ['backend-readiness'],
     queryFn: () => healthApi.readiness(),
-    retry: 1,
+    retry: false,
     refetchInterval: (query) => (query.state.data?.data?.status === 'ready' ? false : 3000),
   })
 
@@ -51,7 +58,7 @@ function SearchPageContent() {
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['search', debouncedQuery, searchType],
-    queryFn: () => searchApi.search(debouncedQuery, searchType !== 'all' ? searchType : undefined),
+    queryFn: () => searchApi.search(debouncedQuery, SEARCH_TYPE_TO_API[searchType]),
     enabled: debouncedQuery.length > 0 && backendReady,
   })
 

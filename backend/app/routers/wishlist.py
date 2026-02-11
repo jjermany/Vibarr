@@ -221,6 +221,31 @@ async def delete_wishlist_item(
     return {"status": "deleted", "id": item_id}
 
 
+@router.post("/search-all")
+async def search_all_wishlist(
+    db: AsyncSession = Depends(get_db),
+):
+    """Search for all wanted wishlist items."""
+    from app.tasks.downloads import process_wishlist
+
+    if not prowlarr_service.is_available:
+        raise HTTPException(
+            status_code=503,
+            detail="Search is unavailable until Prowlarr is configured and reachable",
+        )
+
+    # Count items to search
+    result = await db.execute(
+        select(WishlistItem)
+        .where(WishlistItem.status == WishlistStatus.WANTED)
+    )
+    items = result.scalars().all()
+
+    process_wishlist.delay(search_all=True)
+
+    return {"status": "search_all_queued", "items_to_search": len(items)}
+
+
 @router.post("/{item_id}/search")
 async def search_wishlist_item(
     item_id: int,
@@ -244,31 +269,6 @@ async def search_wishlist_item(
     search_task.delay(item_id)
 
     return {"status": "search_queued", "id": item_id}
-
-
-@router.post("/search-all")
-async def search_all_wishlist(
-    db: AsyncSession = Depends(get_db),
-):
-    """Search for all wanted wishlist items."""
-    from app.tasks.downloads import process_wishlist
-
-    if not prowlarr_service.is_available:
-        raise HTTPException(
-            status_code=503,
-            detail="Search is unavailable until Prowlarr is configured and reachable",
-        )
-
-    # Count items to search
-    result = await db.execute(
-        select(WishlistItem)
-        .where(WishlistItem.status == WishlistStatus.WANTED)
-    )
-    items = result.scalars().all()
-
-    process_wishlist.delay()
-
-    return {"status": "search_all_queued", "items_to_search": len(items)}
 
 
 def _wishlist_item_to_dict(item: WishlistItem) -> dict:
