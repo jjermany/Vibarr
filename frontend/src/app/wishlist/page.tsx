@@ -141,7 +141,7 @@ export default function WishlistPage() {
       {isLoading ? (
         <LoadingPage message="Loading wishlist..." />
       ) : items.length > 0 ? (
-        <div className="card divide-y divide-surface-800">
+        <div className="bg-surface-900 rounded-xl border border-surface-800 overflow-visible divide-y divide-surface-800">
           {items.map((item: WishlistItem) => (
             <WishlistItemRow
               key={item.id}
