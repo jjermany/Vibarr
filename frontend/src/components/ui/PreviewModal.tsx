@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -26,6 +26,10 @@ interface PreviewModalProps {
 }
 
 export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
+  const [headerImageFailed, setHeaderImageFailed] = useState(false)
+  const [avatarImageFailed, setAvatarImageFailed] = useState(false)
+  const [topAlbumImageFailures, setTopAlbumImageFailures] = useState<Record<string, boolean>>({})
+
   // Close on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -59,9 +63,18 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
     enabled: !!item,
   })
 
+  const preview: PreviewData | undefined = previewData?.data
+
+  useEffect(() => {
+    setHeaderImageFailed(false)
+    setAvatarImageFailed(false)
+    setTopAlbumImageFailures({})
+  }, [item?.id, preview?.image_url, preview?.top_albums])
+
   if (!item) return null
 
-  const preview: PreviewData | undefined = previewData?.data
+  const normalizedPreviewImageUrl = (item.image_url || preview?.image_url || '').replace(/^http:\/\//i, 'https://')
+  const isPreviewExternalImage = /^https?:\/\//i.test(normalizedPreviewImageUrl)
 
   return (
     <div
@@ -79,13 +92,15 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
         {/* Header with image */}
         <div className="relative">
           {/* Background blur image */}
-          {(item.image_url || preview?.image_url) && (
+          {normalizedPreviewImageUrl && !headerImageFailed && (
             <div className="absolute inset-0 overflow-hidden">
               <Image
-                src={item.image_url || preview?.image_url || ''}
+                src={normalizedPreviewImageUrl}
                 alt=""
                 fill
                 className="object-cover blur-2xl opacity-30 scale-110"
+                unoptimized={isPreviewExternalImage}
+                onError={() => setHeaderImageFailed(true)}
               />
             </div>
           )}
@@ -93,13 +108,15 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
           <div className="relative p-6 flex gap-5">
             {/* Image / Avatar */}
             <div className={`flex-shrink-0 ${item.type === 'artist' ? 'w-28 h-28 rounded-full' : 'w-28 h-28 rounded-lg'} overflow-hidden bg-surface-800`}>
-              {(item.image_url || preview?.image_url) ? (
+              {normalizedPreviewImageUrl && !avatarImageFailed ? (
                 <Image
-                  src={item.image_url || preview?.image_url || ''}
+                  src={normalizedPreviewImageUrl}
                   alt={item.name}
                   width={112}
                   height={112}
                   className="w-full h-full object-cover"
+                  unoptimized={isPreviewExternalImage}
+                  onError={() => setAvatarImageFailed(true)}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-surface-500">
@@ -200,28 +217,36 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                     <h3 className="text-sm font-medium text-surface-300">Top Albums</h3>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
-                    {preview.top_albums.map((album) => (
-                      <div key={album.title} className="flex flex-col gap-1.5">
-                        <div className="aspect-square rounded-lg overflow-hidden bg-surface-800">
-                          {album.image_url ? (
-                            <Image
-                              src={album.image_url}
-                              alt={album.title}
-                              width={120}
-                              height={120}
-                              className="w-full h-full object-cover"
+                    {preview.top_albums.map((album, i) => {
+                      const albumKey = `${album.title}-${i}`
+                      const normalizedAlbumImageUrl = (album.image_url || '').replace(/^http:\/\//i, 'https://')
+                      const isExternalAlbumImage = /^https?:\/\//i.test(normalizedAlbumImageUrl)
+                      const albumImageFailed = !!topAlbumImageFailures[albumKey]
+
+                      return (
+                        <div key={albumKey} className="flex flex-col gap-1.5">
+                          <div className="aspect-square rounded-lg overflow-hidden bg-surface-800">
+                            {normalizedAlbumImageUrl && !albumImageFailed ? (
+                              <Image
+                                src={normalizedAlbumImageUrl}
+                                alt={album.title}
+                                width={120}
+                                height={120}
+                                className="w-full h-full object-cover"
+                                unoptimized={isExternalAlbumImage}
+                                onError={() => setTopAlbumImageFailures((prev) => ({ ...prev, [albumKey]: true }))}
                             />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-surface-600">
                               <Music className="w-8 h-8" />
                             </div>
                           )}
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-surface-300 line-clamp-1">{album.title}</span>
-                          {!item.in_library && (
-                            <button
-                              onClick={() => onAdd({
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-surface-300 line-clamp-1">{album.title}</span>
+                            {!item.in_library && (
+                              <button
+                                onClick={() => onAdd({
                                 id: `preview-album-${item.name}-${album.title}`,
                                 type: 'album',
                                 name: album.title,
@@ -231,15 +256,16 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                                 in_library: false,
                                 external_ids: {},
                               } as SearchResult)}
-                              className="p-1 text-surface-400 hover:text-white hover:bg-surface-700 rounded"
-                              title="Add album"
+                                className="p-1 text-surface-400 hover:text-white hover:bg-surface-700 rounded"
+                                title="Add album"
                             >
                               <Plus className="w-3.5 h-3.5" />
                             </button>
-                          )}
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
