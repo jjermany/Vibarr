@@ -66,7 +66,7 @@ class UserResponse(BaseModel):
     share_library: bool
     taste_cluster: Optional[str]
     taste_tags: Optional[list]
-    created_at: str
+    created_at: datetime
 
 
 class SetupRequest(BaseModel):
