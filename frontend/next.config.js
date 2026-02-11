@@ -49,6 +49,16 @@ const nextConfig = {
         hostname: 'coverartarchive.org',
         pathname: '/**',
       },
+      {
+        protocol: 'https',
+        hostname: 'e-cdns-images.dzcdn.net',
+        pathname: '/images/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'cdns-images.dzcdn.net',
+        pathname: '/images/**',
+      },
     ],
   },
 }
