@@ -41,6 +41,7 @@ export function AlbumCard({ album, showArtist = true, size = 'md', onClick, onAd
   const inLibrary = album.in_library ?? false
   const [imageFailed, setImageFailed] = useState(false)
   const normalizedCoverUrl = (coverUrl || '').replace(/^http:\/\//i, 'https://')
+  const isExternalImage = /^https?:\/\//i.test(normalizedCoverUrl)
 
   const handleClick = (e: React.MouseEvent) => {
     if (onClick) {
@@ -71,6 +72,7 @@ export function AlbumCard({ album, showArtist = true, size = 'md', onClick, onAd
             alt={title}
             fill
             className="object-cover transition-transform group-hover:scale-105"
+            unoptimized={isExternalImage}
             onError={() => setImageFailed(true)}
           />
         ) : (

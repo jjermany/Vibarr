@@ -30,6 +30,9 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
+# Ensure sharp is available in production for Next.js image optimization
+RUN npm install --omit=dev sharp
+
 USER nextjs
 
 EXPOSE 3000
