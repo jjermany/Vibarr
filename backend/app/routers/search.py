@@ -491,45 +491,55 @@ async def search(
     search_ytmusic = source == "ytmusic"
     search_lastfm = source is None or source == "lastfm"
 
-    # Run searches in parallel
-    tasks = []
+    # Local DB work must remain sequential when sharing the injected DB session.
+    local_tasks = []
+    remote_tasks = []
 
     if not type or type == "artist":
         if search_local:
-            tasks.append(("local_artists", _search_local_artists(db, q, limit)))
+            local_tasks.append(("local_artists", _search_local_artists, (db, q, limit)))
         if search_deezer:
-            tasks.append(("deezer_artists", _search_deezer_artists(q, limit)))
+            remote_tasks.append(("deezer_artists", _search_deezer_artists(q, limit)))
         if search_ytmusic:
-            tasks.append(("ytmusic_artists", _search_ytmusic_artists(q, limit)))
+            remote_tasks.append(("ytmusic_artists", _search_ytmusic_artists(q, limit)))
         if search_lastfm:
-            tasks.append(("lastfm_artists", _search_lastfm_artists(q, limit)))
+            remote_tasks.append(("lastfm_artists", _search_lastfm_artists(q, limit)))
 
     if not type or type == "album":
         if search_local:
-            tasks.append(("local_albums", _search_local_albums(db, q, limit)))
+            local_tasks.append(("local_albums", _search_local_albums, (db, q, limit)))
         if search_deezer:
-            tasks.append(("deezer_albums", _search_deezer_albums(q, limit)))
+            remote_tasks.append(("deezer_albums", _search_deezer_albums(q, limit)))
         if search_ytmusic:
-            tasks.append(("ytmusic_albums", _search_ytmusic_albums(q, limit)))
+            remote_tasks.append(("ytmusic_albums", _search_ytmusic_albums(q, limit)))
         if search_lastfm:
-            tasks.append(("lastfm_albums", _search_lastfm_albums(q, limit)))
+            remote_tasks.append(("lastfm_albums", _search_lastfm_albums(q, limit)))
 
     if not type or type == "track":
         if search_local:
-            tasks.append(("local_tracks", _search_local_tracks(db, q, limit)))
+            local_tasks.append(("local_tracks", _search_local_tracks, (db, q, limit)))
         if search_deezer:
-            tasks.append(("deezer_tracks", _search_deezer_tracks(q, limit)))
+            remote_tasks.append(("deezer_tracks", _search_deezer_tracks(q, limit)))
         if search_ytmusic:
-            tasks.append(("ytmusic_tracks", _search_ytmusic_tracks(q, limit)))
+            remote_tasks.append(("ytmusic_tracks", _search_ytmusic_tracks(q, limit)))
         if search_lastfm:
-            tasks.append(("lastfm_tracks", _search_lastfm_tracks(q, limit)))
+            remote_tasks.append(("lastfm_tracks", _search_lastfm_tracks(q, limit)))
 
-    # Execute all searches concurrently
-    task_names = [t[0] for t in tasks]
-    task_coros = [t[1] for t in tasks]
-    results = await asyncio.gather(*task_coros, return_exceptions=True)
+    # Execute local searches sequentially against the shared DB session.
+    local_results = []
+    for task_name, task_func, task_args in local_tasks:
+        try:
+            result = await task_func(*task_args)
+        except Exception as exc:
+            result = exc
+        local_results.append((task_name, result))
 
-    for name, result in zip(task_names, results):
+    # Execute remote searches concurrently.
+    remote_task_names = [task[0] for task in remote_tasks]
+    remote_task_coros = [task[1] for task in remote_tasks]
+    remote_results = await asyncio.gather(*remote_task_coros, return_exceptions=True)
+
+    for name, result in [*local_results, *zip(remote_task_names, remote_results)]:
         if isinstance(result, Exception):
             logger.error(f"Search task {name} failed: {result}")
             continue
