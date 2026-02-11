@@ -265,6 +265,34 @@ async def plex_callback(request: PlexCallbackRequest, db: AsyncSession = Depends
 @router.post("/register", response_model=TokenResponse)
 async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Register a new user."""
+    await cfg.ensure_cache(db)
+
+    registration_enabled = cfg.get_bool("registration_enabled", default=True)
+    max_users = cfg.get_int("max_users", default=0)
+
+    if not registration_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User registration is currently disabled",
+        )
+
+    active_count_result = await db.execute(
+        select(func.count(User.id)).where(User.is_active == True)
+    )
+    active_user_count = active_count_result.scalar() or 0
+
+    total_count_result = await db.execute(select(func.count(User.id)))
+    total_user_count = total_count_result.scalar() or 0
+
+    if max_users > 0 and total_user_count >= max_users:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Maximum user limit reached ({max_users}). "
+                f"Active users: {active_user_count}."
+            ),
+        )
+
     # Check if username exists
     existing = await db.execute(
         select(User).where(
@@ -279,15 +307,12 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
         )
 
     # Check if this is the first user (make admin)
-    count_result = await db.execute(select(func.count(User.id)))
-    user_count = count_result.scalar() or 0
-
     user = User(
         username=request.username,
         email=request.email,
         hashed_password=get_password_hash(request.password),
         display_name=request.display_name or request.username,
-        is_admin=user_count == 0,  # First user is admin
+        is_admin=total_user_count == 0,  # First user is admin
         last_login_at=datetime.utcnow(),
     )
     db.add(user)
