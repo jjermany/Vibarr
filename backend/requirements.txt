@@ -36,6 +36,7 @@ spotipy==2.23.0
 musicbrainzngs==0.7.1
 pylast==5.2.0
 plexapi==4.15.7
+ytmusicapi==1.9.0
 
 # Music Tagging
 beets>=1.6.0
