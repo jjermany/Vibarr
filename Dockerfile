@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     curl \
     nodejs \
+    npm \
     supervisor \
     postgresql \
     redis-server \
@@ -47,6 +48,9 @@ COPY backend/ ./backend/
 COPY --from=frontend-builder /app/frontend/.next/standalone ./frontend/
 COPY --from=frontend-builder /app/frontend/.next/static ./frontend/.next/static
 COPY --from=frontend-builder /app/frontend/public ./frontend/public
+
+# Ensure sharp is installed where Next.js standalone server.js runs
+RUN cd /app/frontend && npm install --omit=dev sharp
 
 # Copy supervisor config and entrypoint
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf

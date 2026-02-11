@@ -30,6 +30,7 @@ export function ArtistCard({ artist, size = 'md', onClick, onAdd }: ArtistCardPr
   const inLibrary = artist.in_library ?? false
   const [imageFailed, setImageFailed] = useState(false)
   const normalizedImageUrl = (artist.image_url || '').replace(/^http:\/\//i, 'https://')
+  const isExternalImage = /^https?:\/\//i.test(normalizedImageUrl)
 
   const handleClick = (e: React.MouseEvent) => {
     if (onClick) {
@@ -57,6 +58,7 @@ export function ArtistCard({ artist, size = 'md', onClick, onAdd }: ArtistCardPr
             alt={artist.name}
             fill
             className="object-cover transition-transform group-hover:scale-105"
+            unoptimized={isExternalImage}
             onError={() => setImageFailed(true)}
           />
         ) : (
