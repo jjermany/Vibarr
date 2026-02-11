@@ -1,7 +1,10 @@
 """Database configuration and session management."""
 
+import asyncio
 import os
 
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 
@@ -36,8 +39,28 @@ AsyncSessionLocal = async_sessionmaker(
 Base = declarative_base()
 
 
+async def _wait_for_database(max_attempts: int = 30, retry_delay_seconds: float = 1.0) -> None:
+    """Wait for the database to become available.
+
+    In the all-in-one container, PostgreSQL and the API process are started by
+    supervisord at nearly the same time. This can cause a brief startup race
+    where the API attempts to connect before PostgreSQL is ready.
+    """
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            return
+        except (ConnectionRefusedError, OperationalError, DBAPIError):
+            if attempt == max_attempts:
+                raise
+            await asyncio.sleep(retry_delay_seconds)
+
+
 async def init_db() -> None:
     """Initialize database tables."""
+    await _wait_for_database()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
