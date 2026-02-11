@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import Image from 'next/image'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Heart,
   Plus,
   Search,
   Trash2,
-  RefreshCw,
   MoreVertical,
   Loader2,
 } from 'lucide-react'
@@ -24,6 +24,7 @@ export default function WishlistPage() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const [showAddModal, setShowAddModal] = useState(false)
   const queryClient = useQueryClient()
+  const previousStatuses = useRef<Record<number, string>>({})
 
   const { data, isLoading } = useQuery({
     queryKey: ['wishlist', filterStatus],
@@ -48,8 +49,12 @@ export default function WishlistPage() {
     mutationFn: (id: number) => wishlistApi.search(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['wishlist'] })
-      toast.success('Search queued')
+      toast.success('Search queued. Results will appear as soon as indexers respond.')
     },
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail
+      toast.error(detail || 'Search unavailable. Check indexer settings and try again.')
+    }
   })
 
   const searchAllMutation = useMutation({
@@ -58,6 +63,10 @@ export default function WishlistPage() {
       queryClient.invalidateQueries({ queryKey: ['wishlist'] })
       toast.success('Searching all wanted items')
     },
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail
+      toast.error(detail || 'Bulk search unavailable. Check indexer settings and try again.')
+    }
   })
 
   const items = data?.data || []
@@ -72,6 +81,24 @@ export default function WishlistPage() {
     },
     {}
   )
+
+  useEffect(() => {
+    const previous = previousStatuses.current
+    for (const item of items) {
+      const priorStatus = previous[item.id]
+      if (priorStatus === 'searching' && item.status !== 'searching') {
+        const itemLabel = item.album_title || item.artist_name || 'Wishlist item'
+        if (item.status === 'found') {
+          toast.success(`Found a result for ${itemLabel}`)
+        } else if (item.status === 'wanted') {
+          toast(`No matches found yet for ${itemLabel}`, { icon: 'ℹ️' })
+        } else if (item.status === 'failed') {
+          toast.error(`Search failed for ${itemLabel}`)
+        }
+      }
+      previous[item.id] = item.status
+    }
+  }, [items])
 
   return (
     <div className="space-y-6">
@@ -181,13 +208,25 @@ function WishlistItemRow({
   onDelete: () => void
 }) {
   const [showMenu, setShowMenu] = useState(false)
+  const [imageFailed, setImageFailed] = useState(false)
+  const normalizedImageUrl = (item.image_url || '').replace(/^http:\/\//i, 'https://')
 
   return (
     <div className="flex items-center justify-between p-4 hover:bg-surface-800/50 transition-colors">
       <div className="flex items-center gap-4 min-w-0 flex-1">
-        {/* Placeholder album art */}
-        <div className="w-12 h-12 bg-surface-700 rounded flex-shrink-0 flex items-center justify-center text-surface-500">
-          <Heart className="w-5 h-5" />
+        <div className="w-12 h-12 bg-surface-700 rounded flex-shrink-0 flex items-center justify-center text-surface-500 overflow-hidden">
+          {normalizedImageUrl && !imageFailed ? (
+            <Image
+              src={normalizedImageUrl}
+              alt={item.album_title || item.artist_name || 'Wishlist item artwork'}
+              width={48}
+              height={48}
+              className="w-full h-full object-cover"
+              onError={() => setImageFailed(true)}
+            />
+          ) : (
+            <Heart className="w-5 h-5" />
+          )}
         </div>
 
         <div className="min-w-0 flex-1">

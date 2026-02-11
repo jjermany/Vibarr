@@ -169,6 +169,7 @@ export interface WishlistItem {
   priority: string
   source: string
   confidence_score?: number
+  image_url?: string
   auto_download: boolean
   created_at: string
 }
