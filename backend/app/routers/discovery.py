@@ -16,6 +16,7 @@ from app.models.track import Track
 from app.models.recommendation import Recommendation
 from app.models.listening_history import ListeningHistory
 from app.services.lastfm import lastfm_service
+from app.services.deezer import deezer_service
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ router = APIRouter()
 
 class DiscoveryPlaylist(BaseModel):
     """A discovery playlist (like Discover Weekly)."""
+
     id: str
     name: str
     description: str
@@ -35,6 +37,7 @@ class DiscoveryPlaylist(BaseModel):
 
 class DiscoveryItem(BaseModel):
     """Item in a discovery feed."""
+
     id: str
     type: str  # artist, album, playlist
     title: str
@@ -96,13 +99,15 @@ async def get_discovery_home(
                 item["in_library"] = album.in_library
         release_section_items.append(item)
 
-    sections.append({
-        "id": "release_radar",
-        "title": "Release Radar",
-        "description": "New releases from artists you follow",
-        "type": "album_list",
-        "items": release_section_items,
-    })
+    sections.append(
+        {
+            "id": "release_radar",
+            "title": "Release Radar",
+            "description": "New releases from artists you follow",
+            "type": "album_list",
+            "items": release_section_items,
+        }
+    )
 
     # 2. Similar artists - "Because You Listened To..."
     similar_recs = await db.execute(
@@ -133,13 +138,15 @@ async def get_discovery_home(
                 item["in_library"] = artist.in_library
         similar_section_items.append(item)
 
-    sections.append({
-        "id": "similar_to_recent",
-        "title": "Because You Listened To...",
-        "description": "Artists similar to your recent plays",
-        "type": "artist_list",
-        "items": similar_section_items,
-    })
+    sections.append(
+        {
+            "id": "similar_to_recent",
+            "title": "Because You Listened To...",
+            "description": "Artists similar to your recent plays",
+            "type": "artist_list",
+            "items": similar_section_items,
+        }
+    )
 
     # 3. Deep Cuts
     deep_recs = await db.execute(
@@ -178,13 +185,15 @@ async def get_discovery_home(
                 item["in_library"] = artist.in_library
         deep_section_items.append(item)
 
-    sections.append({
-        "id": "deep_cuts",
-        "title": "Deep Cuts",
-        "description": "Hidden gems from artists you know",
-        "type": "album_list",
-        "items": deep_section_items,
-    })
+    sections.append(
+        {
+            "id": "deep_cuts",
+            "title": "Deep Cuts",
+            "description": "Hidden gems from artists you know",
+            "type": "album_list",
+            "items": deep_section_items,
+        }
+    )
 
     # 4. Genre Spotlight - based on top genres in library
     genre_result = await db.execute(
@@ -211,24 +220,28 @@ async def get_discovery_home(
         )
         for artist in genre_artists.scalars().all():
             if artist.genres and top_genre in artist.genres:
-                genre_items.append({
-                    "id": artist.id,
-                    "type": "artist",
-                    "name": artist.name,
-                    "image_url": artist.image_url,
-                    "genres": artist.genres or [],
-                    "in_library": artist.in_library,
-                })
+                genre_items.append(
+                    {
+                        "id": artist.id,
+                        "type": "artist",
+                        "name": artist.name,
+                        "image_url": artist.image_url,
+                        "genres": artist.genres or [],
+                        "in_library": artist.in_library,
+                    }
+                )
                 if len(genre_items) >= 10:
                     break
 
-    sections.append({
-        "id": "genre_spotlight",
-        "title": f"Genre Spotlight: {top_genre.title() if top_genre else 'Explore'}",
-        "description": f"Explore {top_genre if top_genre else 'new genres'}",
-        "type": "artist_list",
-        "items": genre_items,
-    })
+    sections.append(
+        {
+            "id": "genre_spotlight",
+            "title": f"Genre Spotlight: {top_genre.title() if top_genre else 'Explore'}",
+            "description": f"Explore {top_genre if top_genre else 'new genres'}",
+            "type": "artist_list",
+            "items": genre_items,
+        }
+    )
 
     # 5. Discover Weekly placeholder
     discover_recs = await db.execute(
@@ -258,13 +271,16 @@ async def get_discovery_home(
                 item["in_library"] = artist.in_library
         discover_section_items.append(item)
 
-    sections.insert(0, {
-        "id": "discover_weekly",
-        "title": "Discover Weekly",
-        "description": "Fresh picks based on your taste",
-        "type": "artist_list",
-        "items": discover_section_items,
-    })
+    sections.insert(
+        0,
+        {
+            "id": "discover_weekly",
+            "title": "Discover Weekly",
+            "description": "Fresh picks based on your taste",
+            "type": "artist_list",
+            "items": discover_section_items,
+        },
+    )
 
     return {"sections": sections}
 
@@ -305,13 +321,15 @@ async def get_discovery_playlists(
         )
         count = count_result.scalar() or 0
 
-        playlists.append(DiscoveryPlaylist(
-            id=playlist_id,
-            name=info["name"],
-            description=info["description"],
-            track_count=count,
-            generated_at=datetime.utcnow().isoformat(),
-        ))
+        playlists.append(
+            DiscoveryPlaylist(
+                id=playlist_id,
+                name=info["name"],
+                description=info["description"],
+                track_count=count,
+                generated_at=datetime.utcnow().isoformat(),
+            )
+        )
 
     return {"playlists": playlists}
 
@@ -339,20 +357,20 @@ async def get_similar_discoveries(
             for s in similar:
                 # Check if in our DB
                 db_result = await db.execute(
-                    select(Artist).where(
-                        func.lower(Artist.name) == s["name"].lower()
-                    )
+                    select(Artist).where(func.lower(Artist.name) == s["name"].lower())
                 )
                 db_artist = db_result.scalar_one_or_none()
 
-                similar_artists.append({
-                    "name": s.get("name"),
-                    "match": s.get("match", 0),
-                    "id": db_artist.id if db_artist else None,
-                    "image_url": db_artist.image_url if db_artist else None,
-                    "in_library": db_artist.in_library if db_artist else False,
-                    "genres": db_artist.genres if db_artist else [],
-                })
+                similar_artists.append(
+                    {
+                        "name": s.get("name"),
+                        "match": s.get("match", 0),
+                        "id": db_artist.id if db_artist else None,
+                        "image_url": db_artist.image_url if db_artist else None,
+                        "in_library": db_artist.in_library if db_artist else False,
+                        "genres": db_artist.genres if db_artist else [],
+                    }
+                )
         except Exception as e:
             logger.error(f"Error getting similar artists for {artist.name}: {e}")
 
@@ -369,13 +387,15 @@ async def get_similar_discoveries(
             album = await db.execute(select(Album).where(Album.id == rec.album_id))
             album = album.scalar_one_or_none()
             if album:
-                similar_albums.append({
-                    "id": album.id,
-                    "title": album.title,
-                    "cover_url": album.cover_url,
-                    "artist_name": album.artist.name if album.artist else "",
-                    "reason": rec.reason,
-                })
+                similar_albums.append(
+                    {
+                        "id": album.id,
+                        "title": album.title,
+                        "cover_url": album.cover_url,
+                        "artist_name": album.artist.name if album.artist else "",
+                        "reason": rec.reason,
+                    }
+                )
 
     return {
         "based_on_artist_id": artist_id,
@@ -392,15 +412,11 @@ async def explore_genre(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """Explore a specific genre."""
-    # Find artists with this genre
-    artist_query = (
-        select(Artist)
-        .where(Artist.genres.isnot(None))
-    )
+    """Explore a specific genre with local + Deezer results."""
+    artist_query = select(Artist).where(Artist.genres.isnot(None))
 
     if sort == "popular":
-        artist_query = artist_query.order_by(Artist.spotify_popularity.desc().nullslast())
+        artist_query = artist_query.order_by(Artist.lastfm_listeners.desc().nullslast())
     elif sort == "recent":
         artist_query = artist_query.order_by(Artist.created_at.desc())
     else:
@@ -413,41 +429,93 @@ async def explore_genre(
     albums = []
     for a in result.scalars().all():
         if a.genres and genre.lower() in [g.lower() for g in a.genres]:
-            artists.append({
-                "id": a.id,
-                "name": a.name,
-                "image_url": a.image_url,
-                "genres": a.genres,
-                "in_library": a.in_library,
-                "spotify_popularity": a.spotify_popularity,
-            })
+            artists.append(
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "image_url": a.image_url or a.thumb_url,
+                    "genres": a.genres,
+                    "in_library": a.in_library,
+                    "popularity": a.lastfm_listeners,
+                    "source": "local",
+                }
+            )
             if len(artists) >= limit:
                 break
 
-    # Get albums from these artists
     artist_ids = [a["id"] for a in artists[:20]]
     if artist_ids:
         album_result = await db.execute(
             select(Album)
             .where(Album.artist_id.in_(artist_ids))
-            .order_by(Album.spotify_popularity.desc().nullslast())
+            .order_by(Album.release_year.desc().nullslast(), Album.created_at.desc())
             .limit(limit)
         )
         for album in album_result.scalars().all():
-            albums.append({
-                "id": album.id,
-                "title": album.title,
-                "artist_name": album.artist.name if album.artist else "",
-                "cover_url": album.cover_url,
-                "release_year": album.release_year,
-                "in_library": album.in_library,
-            })
+            albums.append(
+                {
+                    "id": album.id,
+                    "title": album.title,
+                    "artist_name": album.artist.name if album.artist else "",
+                    "cover_url": album.cover_url or album.thumb_url,
+                    "release_year": album.release_year,
+                    "in_library": album.in_library,
+                    "source": "local",
+                }
+            )
 
-    # Find related genres
+    deezer_tracks = await deezer_service.search_tracks(
+        f'genre:"{genre}"', limit=max(20, min(limit * 2, 100))
+    )
+    for track in deezer_tracks:
+        artist = track.get("artist") or {}
+        album = track.get("album") or {}
+
+        if artist.get("id") and not any(
+            str(a.get("id")) == f"deezer:{artist['id']}" for a in artists
+        ):
+            artists.append(
+                {
+                    "id": f"deezer:{artist['id']}",
+                    "name": artist.get("name", ""),
+                    "image_url": artist.get("picture_xl")
+                    or artist.get("picture_big")
+                    or artist.get("picture"),
+                    "genres": [genre],
+                    "in_library": False,
+                    "popularity": track.get("rank"),
+                    "source": "deezer",
+                }
+            )
+
+        if album.get("id") and not any(
+            str(a.get("id")) == f"deezer:{album['id']}" for a in albums
+        ):
+            albums.append(
+                {
+                    "id": f"deezer:{album['id']}",
+                    "title": album.get("title", ""),
+                    "artist_name": artist.get("name", ""),
+                    "cover_url": album.get("cover_xl")
+                    or album.get("cover_big")
+                    or album.get("cover"),
+                    "release_year": (
+                        int(album.get("release_date", "")[:4])
+                        if album.get("release_date")
+                        else None
+                    ),
+                    "in_library": False,
+                    "source": "deezer",
+                }
+            )
+
+        if len(artists) >= limit and len(albums) >= limit:
+            break
+
     all_genres = Counter()
     for a in artists:
         for g in a.get("genres", []):
-            if g.lower() != genre.lower():
+            if g and g.lower() != genre.lower():
                 all_genres[g] += 1
     related_genres = [g for g, _ in all_genres.most_common(10)]
 
@@ -466,7 +534,7 @@ async def explore_decade(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """Time machine - explore a specific decade."""
+    """Time machine - explore a specific decade with local + Deezer results."""
     decade_start = decade
     decade_end = decade + 9
 
@@ -480,7 +548,7 @@ async def explore_decade(
         album_query = album_query.where(Album.genres.isnot(None))
 
     album_query = album_query.order_by(
-        Album.spotify_popularity.desc().nullslast()
+        Album.release_year.desc().nullslast(), Album.created_at.desc()
     ).limit(200)
 
     result = await db.execute(album_query)
@@ -488,49 +556,81 @@ async def explore_decade(
 
     albums = []
     artists_seen = set()
-    highlights = []
     for album in albums_data:
-        if genre and album.genres:
-            if genre.lower() not in [g.lower() for g in album.genres]:
-                continue
+        if (
+            genre
+            and album.genres
+            and genre.lower() not in [g.lower() for g in album.genres]
+        ):
+            continue
 
         item = {
             "id": album.id,
             "title": album.title,
             "artist_name": album.artist.name if album.artist else "",
-            "cover_url": album.cover_url,
+            "cover_url": album.cover_url or album.thumb_url,
             "release_year": album.release_year,
             "in_library": album.in_library,
-            "spotify_popularity": album.spotify_popularity,
+            "source": "local",
         }
         albums.append(item)
 
-        # Track unique artists for highlights
         if album.artist and album.artist.id not in artists_seen:
             artists_seen.add(album.artist.id)
 
         if len(albums) >= limit:
             break
 
-    # Top albums as highlights
-    highlights = sorted(albums, key=lambda a: a.get("spotify_popularity") or 0, reverse=True)[:5]
+    deezer_tracks = await deezer_service.search_tracks(
+        str(decade), limit=max(20, min(limit * 2, 100))
+    )
+    for track in deezer_tracks:
+        album = track.get("album") or {}
+        artist = track.get("artist") or {}
+        release = album.get("release_date") or ""
+        year = int(release[:4]) if len(release) >= 4 and release[:4].isdigit() else None
+        if year is not None and not (decade_start <= year <= decade_end):
+            continue
+        if album.get("id") and not any(
+            str(a.get("id")) == f"deezer:{album['id']}" for a in albums
+        ):
+            albums.append(
+                {
+                    "id": f"deezer:{album['id']}",
+                    "title": album.get("title", ""),
+                    "artist_name": artist.get("name", ""),
+                    "cover_url": album.get("cover_xl")
+                    or album.get("cover_big")
+                    or album.get("cover"),
+                    "release_year": year,
+                    "in_library": False,
+                    "source": "deezer",
+                }
+            )
+        if len(albums) >= limit:
+            break
 
-    # Get artists from the decade
+    highlights = [a for a in albums if a.get("cover_url")][:5]
+
     artist_ids = list(artists_seen)[:30]
     artists = []
     if artist_ids:
         artist_result = await db.execute(
-            select(Artist).where(Artist.id.in_(artist_ids))
-            .order_by(Artist.spotify_popularity.desc().nullslast())
+            select(Artist)
+            .where(Artist.id.in_(artist_ids))
+            .order_by(Artist.lastfm_listeners.desc().nullslast())
             .limit(limit)
         )
         for a in artist_result.scalars().all():
-            artists.append({
-                "id": a.id,
-                "name": a.name,
-                "image_url": a.image_url,
-                "in_library": a.in_library,
-            })
+            artists.append(
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "image_url": a.image_url or a.thumb_url,
+                    "in_library": a.in_library,
+                    "source": "local",
+                }
+            )
 
     return {
         "decade": decade,
@@ -547,29 +647,30 @@ async def explore_mood(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Explore music by mood using audio features.
-
-    Moods map to audio feature combinations:
-    - energetic: high energy, high tempo
-    - chill: low energy, high valence
-    - sad: low valence, low energy
-    - happy: high valence, high danceability
-    - focus: high instrumentalness, moderate tempo
-    - workout: high energy, high tempo, high danceability
-    """
+    """Explore music by mood using local audio features + Deezer enrichment."""
     mood_profiles = {
         "energetic": {"energy": (0.7, 1.0), "tempo": (120, 200)},
         "chill": {"energy": (0.0, 0.4), "valence": (0.5, 1.0)},
         "sad": {"valence": (0.0, 0.3), "energy": (0.0, 0.4)},
         "happy": {"valence": (0.7, 1.0), "danceability": (0.6, 1.0)},
         "focus": {"instrumentalness": (0.5, 1.0), "tempo": (80, 130)},
-        "workout": {"energy": (0.7, 1.0), "tempo": (120, 180), "danceability": (0.6, 1.0)},
+        "workout": {
+            "energy": (0.7, 1.0),
+            "tempo": (120, 180),
+            "danceability": (0.6, 1.0),
+        },
+    }
+    mood_queries = {
+        "energetic": "high energy workout",
+        "chill": "chill ambient",
+        "sad": "sad acoustic",
+        "happy": "happy pop",
+        "focus": "focus instrumental",
+        "workout": "workout gym",
     }
 
     profile = mood_profiles.get(mood, {})
 
-    # Build query based on audio features
     query = select(Track).join(Album, Track.album_id == Album.id)
 
     for feature, (low, high) in profile.items():
@@ -582,9 +683,11 @@ async def explore_mood(
         elif feature == "danceability":
             query = query.where(Track.danceability >= low, Track.danceability <= high)
         elif feature == "instrumentalness":
-            query = query.where(Track.instrumentalness >= low, Track.instrumentalness <= high)
+            query = query.where(
+                Track.instrumentalness >= low, Track.instrumentalness <= high
+            )
 
-    query = query.order_by(Track.spotify_popularity.desc().nullslast()).limit(limit)
+    query = query.order_by(Track.created_at.desc()).limit(limit)
 
     result = await db.execute(query)
     tracks_data = result.scalars().all()
@@ -594,35 +697,83 @@ async def explore_mood(
     albums = []
 
     for track in tracks_data:
-        tracks.append({
-            "id": track.id,
-            "title": track.title,
-            "artist_name": track.album.artist.name if track.album and track.album.artist else "",
-            "album_title": track.album.title if track.album else "",
-            "duration_ms": track.duration_ms,
-            "energy": track.energy,
-            "valence": track.valence,
-            "danceability": track.danceability,
-            "tempo": track.tempo,
-            "in_library": track.in_library,
-        })
+        tracks.append(
+            {
+                "id": track.id,
+                "title": track.title,
+                "artist_name": (
+                    track.album.artist.name
+                    if track.album and track.album.artist
+                    else ""
+                ),
+                "album_title": track.album.title if track.album else "",
+                "duration_ms": track.duration_ms,
+                "energy": track.energy,
+                "valence": track.valence,
+                "danceability": track.danceability,
+                "tempo": track.tempo,
+                "in_library": track.in_library,
+                "source": "local",
+            }
+        )
 
         if track.album_id and track.album_id not in album_ids_seen:
             album_ids_seen.add(track.album_id)
             album = track.album
             if album:
-                albums.append({
-                    "id": album.id,
-                    "title": album.title,
-                    "artist_name": album.artist.name if album.artist else "",
-                    "cover_url": album.cover_url,
-                    "in_library": album.in_library,
-                })
+                albums.append(
+                    {
+                        "id": album.id,
+                        "title": album.title,
+                        "artist_name": album.artist.name if album.artist else "",
+                        "cover_url": album.cover_url or album.thumb_url,
+                        "in_library": album.in_library,
+                        "source": "local",
+                    }
+                )
+
+    deezer_tracks = await deezer_service.search_tracks(
+        mood_queries.get(mood, mood), limit=max(20, min(limit * 2, 100))
+    )
+    for track in deezer_tracks:
+        artist = track.get("artist") or {}
+        album = track.get("album") or {}
+
+        tracks.append(
+            {
+                "id": f"deezer:{track.get('id')}",
+                "title": track.get("title", ""),
+                "artist_name": artist.get("name", ""),
+                "album_title": album.get("title", ""),
+                "duration_ms": (track.get("duration") or 0) * 1000,
+                "in_library": False,
+                "source": "deezer",
+            }
+        )
+
+        if album.get("id") and not any(
+            str(a.get("id")) == f"deezer:{album['id']}" for a in albums
+        ):
+            albums.append(
+                {
+                    "id": f"deezer:{album['id']}",
+                    "title": album.get("title", ""),
+                    "artist_name": artist.get("name", ""),
+                    "cover_url": album.get("cover_xl")
+                    or album.get("cover_big")
+                    or album.get("cover"),
+                    "in_library": False,
+                    "source": "deezer",
+                }
+            )
+
+        if len(tracks) >= limit and len(albums) >= 20:
+            break
 
     return {
         "mood": mood,
         "audio_profile": profile,
-        "tracks": tracks,
+        "tracks": tracks[:limit],
         "albums": albums[:20],
     }
 
@@ -632,9 +783,15 @@ async def refresh_discoveries(
     db: AsyncSession = Depends(get_db),
 ):
     """Manually trigger discovery refresh."""
-    from app.tasks.recommendations import generate_daily_recommendations, check_new_releases
+    from app.tasks.recommendations import (
+        generate_daily_recommendations,
+        check_new_releases,
+    )
 
     generate_daily_recommendations.delay()
     check_new_releases.delay()
 
-    return {"status": "refresh_queued", "message": "Recommendations and new release check queued"}
+    return {
+        "status": "refresh_queued",
+        "message": "Recommendations and new release check queued",
+    }

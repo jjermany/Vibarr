@@ -37,6 +37,34 @@ class SearchResultItem(BaseModel):
     external_ids: dict = {}
 
 
+def _deezer_image_from_payload(payload: dict, kind: str) -> Optional[str]:
+    """Get the best Deezer image URL from a payload."""
+    if not payload:
+        return None
+
+    candidate_fields = {
+        "artist": (
+            "picture_xl",
+            "picture_big",
+            "picture_medium",
+            "picture",
+            "picture_small",
+        ),
+        "album": ("cover_xl", "cover_big", "cover_medium", "cover", "cover_small"),
+    }.get(kind, ())
+
+    for field in candidate_fields:
+        value = payload.get(field)
+        if value:
+            return value
+
+    md5_image = payload.get("md5_image")
+    if md5_image:
+        return f"https://e-cdns-images.dzcdn.net/images/{kind}/{md5_image}/1000x1000-000000-80-0-0.jpg"
+
+    return None
+
+
 class SearchResponse(BaseModel):
     """Search response containing results from multiple sources."""
 
@@ -182,9 +210,7 @@ async def _search_deezer_artists(query: str, limit: int) -> List[SearchResultIte
                 id=f"deezer:{a['id']}",
                 type="artist",
                 name=a.get("name", ""),
-                image_url=a.get("picture_xl")
-                or a.get("picture_big")
-                or a.get("picture"),
+                image_url=_deezer_image_from_payload(a, "artist"),
                 source="deezer",
                 in_library=False,
                 external_ids={"deezer_id": str(a["id"])},
@@ -206,7 +232,8 @@ async def _search_deezer_albums(query: str, limit: int) -> List[SearchResultItem
                 type="album",
                 name=a.get("title", ""),
                 artist_name=a.get("artist", {}).get("name"),
-                image_url=a.get("cover_xl") or a.get("cover_big") or a.get("cover"),
+                image_url=_deezer_image_from_payload(a, "album")
+                or _deezer_image_from_payload(a.get("artist", {}), "artist"),
                 year=(
                     int(a["release_date"][:4])
                     if a.get("release_date") and len(a["release_date"]) >= 4
@@ -234,18 +261,26 @@ async def _search_deezer_tracks(query: str, limit: int) -> List[SearchResultItem
                 name=t.get("title", ""),
                 artist_name=t.get("artist", {}).get("name"),
                 album_name=t.get("album", {}).get("title"),
-                image_url=t.get("album", {}).get("cover_xl")
-                or t.get("album", {}).get("cover_big")
-                or t.get("album", {}).get("cover"),
+                image_url=_deezer_image_from_payload(t.get("album", {}), "album")
+                or _deezer_image_from_payload(t.get("artist", {}), "artist"),
                 source="deezer",
                 in_library=False,
                 external_ids={
-                    "deezer_id": str(t["id"]),
-                    "deezer_artist_id": (
-                        str(t.get("artist", {}).get("id"))
-                        if t.get("artist", {}).get("id")
-                        else ""
-                    ),
+                    k: v
+                    for k, v in {
+                        "deezer_id": str(t["id"]),
+                        "deezer_artist_id": (
+                            str(t.get("artist", {}).get("id"))
+                            if t.get("artist", {}).get("id")
+                            else None
+                        ),
+                        "deezer_album_id": (
+                            str(t.get("album", {}).get("id"))
+                            if t.get("album", {}).get("id")
+                            else None
+                        ),
+                    }.items()
+                    if v
                 },
             )
             for t in results
