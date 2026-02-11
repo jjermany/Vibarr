@@ -213,7 +213,7 @@ function WishlistItemRow({
                 className="fixed inset-0 z-10"
                 onClick={() => setShowMenu(false)}
               />
-              <div className="absolute right-0 top-full mt-1 w-48 bg-surface-800 border border-surface-700 rounded-lg shadow-lg z-20 py-1">
+              <div className="absolute right-0 bottom-full mb-1 w-48 bg-surface-800 border border-surface-700 rounded-lg shadow-lg z-20 py-1">
                 <button
                   onClick={() => {
                     onSearch()
