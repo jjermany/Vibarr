@@ -2,6 +2,7 @@
 
 import Image from 'next/image'
 import { Play, Plus, Check } from 'lucide-react'
+import { useState } from 'react'
 import { cn, getInitials } from '@/lib/utils'
 
 interface ArtistLike {
@@ -27,6 +28,8 @@ export function ArtistCard({ artist, size = 'md', onClick, onAdd }: ArtistCardPr
   }
 
   const inLibrary = artist.in_library ?? false
+  const [imageFailed, setImageFailed] = useState(false)
+  const normalizedImageUrl = (artist.image_url || '').replace(/^http:\/\//i, 'https://')
 
   const handleClick = (e: React.MouseEvent) => {
     if (onClick) {
@@ -48,12 +51,13 @@ export function ArtistCard({ artist, size = 'md', onClick, onAdd }: ArtistCardPr
     >
       {/* Avatar */}
       <div className="relative w-full aspect-square rounded-full overflow-hidden bg-surface-800 mb-3">
-        {artist.image_url ? (
+        {normalizedImageUrl && !imageFailed ? (
           <Image
-            src={artist.image_url}
+            src={normalizedImageUrl}
             alt={artist.name}
             fill
             className="object-cover transition-transform group-hover:scale-105"
+            onError={() => setImageFailed(true)}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-surface-600">
