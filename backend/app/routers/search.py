@@ -681,16 +681,12 @@ async def get_preview(
                 return PreviewResponse(
                     type="artist",
                     name=artist_data.get("name", name),
-                    image_url=artist_data.get("picture_xl")
-                    or artist_data.get("picture_big")
-                    or artist_data.get("picture"),
+                    image_url=_deezer_image_from_payload(artist_data, "artist"),
                     tags=[],
                     top_albums=[
                         {
                             "title": album.get("title"),
-                            "image_url": album.get("cover_xl")
-                            or album.get("cover_big")
-                            or album.get("cover"),
+                            "image_url": _deezer_image_from_payload(album, "album"),
                             "release_year": (
                                 int(album["release_date"][:4])
                                 if album.get("release_date")
