@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   Search,
   RefreshCw,
@@ -44,7 +44,9 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const notifRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
+  const pathname = usePathname()
   const { user, logout } = useAuth()
+  const isSearchPage = pathname === '/search'
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -131,25 +133,27 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
       </button>
 
       {/* Search */}
-      <form onSubmit={handleSearch} className="flex-1 max-w-xl">
-        <div
-          className={cn(
-            'relative flex items-center transition-all',
-            isSearchFocused && 'ring-2 ring-primary-500 rounded-lg'
-          )}
-        >
-          <Search className="absolute left-3 w-5 h-5 text-surface-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setIsSearchFocused(true)}
-            onBlur={() => setIsSearchFocused(false)}
-            placeholder="Search artists, albums, tracks..."
-            className="w-full pl-10 pr-4 py-2.5 bg-surface-800 border border-surface-700 rounded-lg text-white placeholder-surface-400 focus:outline-none text-sm sm:text-base"
-          />
-        </div>
-      </form>
+      {!isSearchPage && (
+        <form onSubmit={handleSearch} className="flex-1 max-w-xl">
+          <div
+            className={cn(
+              'relative flex items-center transition-all',
+              isSearchFocused && 'ring-2 ring-primary-500 rounded-lg'
+            )}
+          >
+            <Search className="absolute left-3 w-5 h-5 text-surface-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setIsSearchFocused(false)}
+              placeholder="Search artists, albums, tracks..."
+              className="w-full pl-10 pr-4 py-2.5 bg-surface-800 border border-surface-700 rounded-lg text-white placeholder-surface-400 focus:outline-none text-sm sm:text-base"
+            />
+          </div>
+        </form>
+      )}
 
       {/* Actions */}
       <div className="flex items-center gap-1 sm:gap-2 ml-2 sm:ml-4">
