@@ -27,12 +27,12 @@ def _run_async(coro):
 
 
 @celery_app.task(name="app.tasks.downloads.process_wishlist")
-def process_wishlist():
+def process_wishlist(search_all=False):
     """Process wishlist items and search for downloads."""
-    return _run_async(_process_wishlist_async())
+    return _run_async(_process_wishlist_async(search_all=search_all))
 
 
-async def _process_wishlist_async():
+async def _process_wishlist_async(search_all=False):
     """Async implementation of wishlist processing."""
     logger.info("Processing wishlist")
 
@@ -44,12 +44,11 @@ async def _process_wishlist_async():
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
 
-        # Get wanted items with auto_download enabled
-        result = await db.execute(
-            select(WishlistItem)
-            .where(WishlistItem.status == WishlistStatus.WANTED)
-            .where(WishlistItem.auto_download == True)
-        )
+        # Get wanted items (auto_download only for scheduled runs, all for manual)
+        query = select(WishlistItem).where(WishlistItem.status == WishlistStatus.WANTED)
+        if not search_all:
+            query = query.where(WishlistItem.auto_download == True)
+        result = await db.execute(query)
         items = result.scalars().all()
 
         searched = 0
