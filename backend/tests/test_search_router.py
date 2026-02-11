@@ -19,6 +19,41 @@ def test_deezer_image_from_payload_uses_md5_fallback():
     )
 
 
+def test_search_models_do_not_share_mutable_defaults():
+    first_item = search_router.SearchResultItem(
+        id="1", type="artist", name="first", source="local"
+    )
+    second_item = search_router.SearchResultItem(
+        id="2", type="artist", name="second", source="local"
+    )
+
+    first_item.external_ids["spotify_id"] = "abc"
+
+    assert second_item.external_ids == {}
+
+    first_response = search_router.SearchResponse(query="q", total=0)
+    second_response = search_router.SearchResponse(query="q", total=0)
+
+    first_response.artists.append(first_item)
+    first_response.albums.append(first_item)
+    first_response.tracks.append(first_item)
+
+    assert second_response.artists == []
+    assert second_response.albums == []
+    assert second_response.tracks == []
+
+    first_preview = search_router.PreviewResponse(type="artist", name="first")
+    second_preview = search_router.PreviewResponse(type="artist", name="second")
+
+    first_preview.tags.append("rock")
+    first_preview.top_albums.append({"name": "best of"})
+    first_preview.tracks.append({"name": "track 1"})
+
+    assert second_preview.tags == []
+    assert second_preview.top_albums == []
+    assert second_preview.tracks == []
+
+
 @pytest.mark.asyncio
 async def test_search_deezer_tracks_populates_image_and_external_ids(monkeypatch):
     async def fake_search_tracks(_query: str, limit: int = 20):

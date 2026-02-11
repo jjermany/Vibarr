@@ -5,7 +5,7 @@ import logging
 from typing import Optional, List
 
 from fastapi import APIRouter, Query, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,7 +34,7 @@ class SearchResultItem(BaseModel):
     year: Optional[int] = None
     source: str  # local, deezer, ytmusic, lastfm
     in_library: bool = False
-    external_ids: dict = {}
+    external_ids: dict = Field(default_factory=dict)
 
 
 def _deezer_image_from_payload(payload: dict, kind: str) -> Optional[str]:
@@ -70,9 +70,9 @@ class SearchResponse(BaseModel):
 
     query: str
     total: int
-    artists: List[SearchResultItem] = []
-    albums: List[SearchResultItem] = []
-    tracks: List[SearchResultItem] = []
+    artists: List[SearchResultItem] = Field(default_factory=list)
+    albums: List[SearchResultItem] = Field(default_factory=list)
+    tracks: List[SearchResultItem] = Field(default_factory=list)
 
 
 class PreviewResponse(BaseModel):
@@ -85,9 +85,9 @@ class PreviewResponse(BaseModel):
     bio: Optional[str] = None
     listeners: Optional[int] = None
     playcount: Optional[int] = None
-    tags: List[str] = []
-    top_albums: List[dict] = []
-    tracks: List[dict] = []
+    tags: List[str] = Field(default_factory=list)
+    top_albums: List[dict] = Field(default_factory=list)
+    tracks: List[dict] = Field(default_factory=list)
     source: str = "lastfm"
     url: Optional[str] = None
 
