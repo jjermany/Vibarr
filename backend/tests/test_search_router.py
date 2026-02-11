@@ -164,3 +164,87 @@ async def test_search_endpoint_returns_local_results_without_local_task_errors(
     assert payload["albums"][0]["source"] == "local"
     assert payload["tracks"][0]["source"] == "local"
     assert "Search task local_" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_get_preview_deezer_artist_uses_helper_image_fallbacks(monkeypatch):
+    async def fake_search_artists(_name: str, limit: int = 1):
+        assert limit == 1
+        return [{"id": 99, "name": "Fallback Artist", "picture_small": "https://img/artist-small.jpg"}]
+
+    async def fake_get_artist_albums(artist_id: int, limit: int = 8):
+        assert artist_id == 99
+        assert limit == 8
+        return [
+            {
+                "title": "Medium Cover Album",
+                "cover_medium": "https://img/album-medium.jpg",
+                "release_date": "2022-05-01",
+            },
+            {
+                "title": "Small Cover Album",
+                "cover_small": "https://img/album-small.jpg",
+                "release_date": "2021-03-01",
+            },
+        ]
+
+    async def fake_get_artist_top_tracks(artist_id: int, limit: int = 12):
+        assert artist_id == 99
+        assert limit == 12
+        return [{"title": "Top Track", "duration": 123, "track_position": 1}]
+
+    monkeypatch.setattr(search_router.deezer_service, "search_artists", fake_search_artists)
+    monkeypatch.setattr(
+        search_router.deezer_service, "get_artist_albums", fake_get_artist_albums
+    )
+    monkeypatch.setattr(
+        search_router.deezer_service,
+        "get_artist_top_tracks",
+        fake_get_artist_top_tracks,
+    )
+
+    response = await search_router.get_preview(
+        type="artist", name="Fallback Artist", source="deezer", db=None
+    )
+
+    assert response.image_url == "https://img/artist-small.jpg"
+    assert response.top_albums[0]["image_url"] == "https://img/album-medium.jpg"
+    assert response.top_albums[1]["image_url"] == "https://img/album-small.jpg"
+    assert response.top_albums[0]["release_year"] == 2022
+
+
+@pytest.mark.asyncio
+async def test_get_preview_deezer_artist_album_image_uses_md5_fallback(monkeypatch):
+    async def fake_search_artists(_name: str, limit: int = 1):
+        return [{"id": 5, "name": "MD5 Artist", "md5_image": "artistmd5"}]
+
+    async def fake_get_artist_albums(_artist_id: int, limit: int = 8):
+        assert limit == 8
+        return [{"title": "MD5 Album", "md5_image": "albummd5"}]
+
+    async def fake_get_artist_top_tracks(_artist_id: int, limit: int = 12):
+        assert limit == 12
+        return []
+
+    monkeypatch.setattr(search_router.deezer_service, "search_artists", fake_search_artists)
+    monkeypatch.setattr(
+        search_router.deezer_service, "get_artist_albums", fake_get_artist_albums
+    )
+    monkeypatch.setattr(
+        search_router.deezer_service,
+        "get_artist_top_tracks",
+        fake_get_artist_top_tracks,
+    )
+
+    response = await search_router.get_preview(
+        type="artist", name="MD5 Artist", source="deezer", db=None
+    )
+
+    assert (
+        response.image_url
+        == "https://e-cdns-images.dzcdn.net/images/artist/artistmd5/1000x1000-000000-80-0-0.jpg"
+    )
+    assert (
+        response.top_albums[0]["image_url"]
+        == "https://e-cdns-images.dzcdn.net/images/album/albummd5/1000x1000-000000-80-0-0.jpg"
+    )
