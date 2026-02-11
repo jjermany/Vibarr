@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { Search as SearchIcon, Music, Disc, User, Check, Plus } from 'lucide-react'
-import { searchApi, wishlistApi } from '@/lib/api'
+import { Search as SearchIcon, Music, Disc, User, Check, Plus, AlertCircle } from 'lucide-react'
+import { searchApi, wishlistApi, healthApi } from '@/lib/api'
 import type { SearchResult } from '@/lib/api'
 import { AlbumCard } from '@/components/ui/AlbumCard'
 import { ArtistCard } from '@/components/ui/ArtistCard'
@@ -40,10 +40,19 @@ function SearchPageContent() {
     return () => clearTimeout(timer)
   }, [query])
 
+  const { data: readinessData, isLoading: readinessLoading } = useQuery({
+    queryKey: ['backend-readiness'],
+    queryFn: () => healthApi.readiness(),
+    retry: 1,
+    refetchInterval: (query) => (query.state.data?.data?.status === 'ready' ? false : 3000),
+  })
+
+  const backendReady = readinessData?.data?.status === 'ready'
+
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['search', debouncedQuery, searchType],
     queryFn: () => searchApi.search(debouncedQuery, searchType !== 'all' ? searchType : undefined),
-    enabled: debouncedQuery.length > 0,
+    enabled: debouncedQuery.length > 0 && backendReady,
   })
 
   const results = data?.data || { artists: [], albums: [], tracks: [] }
@@ -85,9 +94,10 @@ function SearchPageContent() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search for artists, albums, or tracks..."
-          className="w-full pl-12 pr-4 py-3 bg-surface-800 border border-surface-700 rounded-xl text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-lg"
+          placeholder={backendReady ? 'Search for artists, albums, or tracks...' : 'Preparing search services...'}
+          className="w-full pl-12 pr-4 py-3 bg-surface-800 border border-surface-700 rounded-xl text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-lg disabled:opacity-60 disabled:cursor-not-allowed"
           autoFocus
+          disabled={!backendReady}
         />
         {isFetching && (
           <div className="absolute right-4 top-1/2 -translate-y-1/2">
@@ -95,6 +105,19 @@ function SearchPageContent() {
           </div>
         )}
       </div>
+
+
+      {!backendReady && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 max-w-2xl">
+          {readinessLoading ? <LoadingSpinner size="sm" /> : <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
+          <div>
+            <p className="font-medium">Search is starting up</p>
+            <p className="text-amber-200/80">
+              Vibarr is still warming up services. Search will be enabled automatically when startup is complete.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Type Filters */}
       <div className="flex items-center gap-2">
@@ -118,7 +141,13 @@ function SearchPageContent() {
       </div>
 
       {/* Results */}
-      {!debouncedQuery ? (
+      {!backendReady ? (
+        <EmptyState
+          icon={<SearchIcon className="w-8 h-8" />}
+          title="Starting search services"
+          description="Please wait while backend services finish loading. The search box will enable automatically."
+        />
+      ) : !debouncedQuery ? (
         <EmptyState
           icon={<SearchIcon className="w-8 h-8" />}
           title="Search for music"

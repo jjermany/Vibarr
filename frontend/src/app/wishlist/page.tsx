@@ -9,6 +9,7 @@ import {
   Trash2,
   RefreshCw,
   MoreVertical,
+  Loader2,
 } from 'lucide-react'
 import { wishlistApi, type WishlistItem } from '@/lib/api'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -28,6 +29,11 @@ export default function WishlistPage() {
     queryKey: ['wishlist', filterStatus],
     queryFn: () =>
       wishlistApi.list(filterStatus !== 'all' ? { status: filterStatus } : undefined),
+    refetchInterval: (query) => {
+      const items = (query.state.data as any)?.data || []
+      const active = items.some((item: WishlistItem) => ['searching', 'downloading', 'importing', 'queued'].includes(item.status))
+      return active ? 3000 : false
+    },
   })
 
   const deleteMutation = useMutation({
@@ -55,6 +61,9 @@ export default function WishlistPage() {
   })
 
   const items = data?.data || []
+
+
+  const activeSearchCount = items.filter((item: WishlistItem) => item.status === 'searching').length
 
   const statusCounts = items.reduce(
     (acc: Record<string, number>, item: WishlistItem) => {
@@ -117,6 +126,16 @@ export default function WishlistPage() {
           )
         )}
       </div>
+
+
+      {activeSearchCount > 0 && (
+        <div className="rounded-lg border border-primary-500/30 bg-primary-500/10 px-4 py-3 text-sm text-primary-200 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>
+            {activeSearchCount} wishlist {activeSearchCount === 1 ? 'item is' : 'items are'} currently being searched across indexers. This updates automatically.
+          </span>
+        </div>
+      )}
 
       {/* Content */}
       {isLoading ? (
@@ -200,7 +219,7 @@ function WishlistItemRow({
             <Search className="w-4 h-4" />
           </button>
         )}
-        <div className="relative">
+        <div className="relative z-30">
           <button
             onClick={() => setShowMenu(!showMenu)}
             className="btn-ghost p-2"
@@ -213,7 +232,7 @@ function WishlistItemRow({
                 className="fixed inset-0 z-10"
                 onClick={() => setShowMenu(false)}
               />
-              <div className="absolute right-0 bottom-full mb-1 w-48 bg-surface-800 border border-surface-700 rounded-lg shadow-lg z-20 py-1">
+              <div className="absolute right-0 top-full mt-1 w-48 bg-surface-800 border border-surface-700 rounded-lg shadow-lg z-40 py-1">
                 <button
                   onClick={() => {
                     onSearch()

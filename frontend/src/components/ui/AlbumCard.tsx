@@ -2,6 +2,7 @@
 
 import Image from 'next/image'
 import { Play, Plus, Check, Music } from 'lucide-react'
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface AlbumLike {
@@ -38,6 +39,8 @@ export function AlbumCard({ album, showArtist = true, size = 'md', onClick, onAd
   const artistName = album.artist_name
   const year = album.release_year || album.year
   const inLibrary = album.in_library ?? false
+  const [imageFailed, setImageFailed] = useState(false)
+  const normalizedCoverUrl = (coverUrl || '').replace(/^http:\/\//i, 'https://')
 
   const handleClick = (e: React.MouseEvent) => {
     if (onClick) {
@@ -62,12 +65,13 @@ export function AlbumCard({ album, showArtist = true, size = 'md', onClick, onAd
     >
       {/* Cover */}
       <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-800 mb-3">
-        {coverUrl ? (
+        {normalizedCoverUrl && !imageFailed ? (
           <Image
-            src={coverUrl}
+            src={normalizedCoverUrl}
             alt={title}
             fill
             className="object-cover transition-transform group-hover:scale-105"
+            onError={() => setImageFailed(true)}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-surface-600">

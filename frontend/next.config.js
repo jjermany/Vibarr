@@ -59,6 +59,37 @@ const nextConfig = {
         hostname: 'cdns-images.dzcdn.net',
         pathname: '/images/**',
       },
+
+      {
+        protocol: 'http',
+        hostname: 'i.scdn.co',
+        pathname: '/image/**',
+      },
+      {
+        protocol: 'http',
+        hostname: 'lastfm.freetls.fastly.net',
+        pathname: '/i/**',
+      },
+      {
+        protocol: 'http',
+        hostname: 'www.theaudiodb.com',
+        pathname: '/images/**',
+      },
+      {
+        protocol: 'http',
+        hostname: 'coverartarchive.org',
+        pathname: '/**',
+      },
+      {
+        protocol: 'http',
+        hostname: 'e-cdns-images.dzcdn.net',
+        pathname: '/images/**',
+      },
+      {
+        protocol: 'http',
+        hostname: 'cdns-images.dzcdn.net',
+        pathname: '/images/**',
+      },
     ],
   },
 }

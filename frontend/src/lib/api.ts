@@ -699,6 +699,10 @@ export const settingsApi = {
     api.get<{ notifications: Notification[]; count: number }>('/api/settings/notifications', { params: { limit } }),
 }
 
+export const healthApi = {
+  readiness: () => api.get<{ status: string; checks: { database: boolean; redis: boolean } }>('/health/ready'),
+}
+
 export const statsApi = {
   overview: (days?: number) =>
     api.get<ListeningStats>('/api/stats/overview', { params: { days } }),

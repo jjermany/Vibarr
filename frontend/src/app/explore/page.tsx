@@ -1,32 +1,18 @@
 'use client'
 
 import Link from 'next/link'
-import { Compass, Music, Clock, Sparkles, Heart } from 'lucide-react'
+import { Compass, Music, Clock, Heart, ArrowRight } from 'lucide-react'
 
 const genres = [
-  { name: 'Rock', color: 'from-red-500 to-orange-500' },
-  { name: 'Pop', color: 'from-pink-500 to-rose-500' },
-  { name: 'Hip Hop', color: 'from-amber-500 to-yellow-500' },
-  { name: 'Electronic', color: 'from-cyan-500 to-blue-500' },
-  { name: 'Jazz', color: 'from-purple-500 to-violet-500' },
-  { name: 'Classical', color: 'from-emerald-500 to-teal-500' },
-  { name: 'Metal', color: 'from-slate-500 to-zinc-500' },
-  { name: 'Indie', color: 'from-orange-500 to-amber-500' },
-  { name: 'R&B', color: 'from-violet-500 to-purple-500' },
-  { name: 'Country', color: 'from-yellow-500 to-lime-500' },
-  { name: 'Blues', color: 'from-blue-500 to-indigo-500' },
-  { name: 'Folk', color: 'from-lime-500 to-green-500' },
+  { name: 'Rock', color: 'from-red-500 to-orange-500', description: 'Guitar-driven classics and modern anthems' },
+  { name: 'Pop', color: 'from-pink-500 to-rose-500', description: 'Hooks, melodies, and chart favorites' },
+  { name: 'Hip Hop', color: 'from-amber-500 to-yellow-500', description: 'Bars, beats, and fresh releases' },
+  { name: 'Electronic', color: 'from-cyan-500 to-blue-500', description: 'Club, house, and experimental sounds' },
+  { name: 'Jazz', color: 'from-purple-500 to-violet-500', description: 'Improvisation from standards to modern fusion' },
+  { name: 'Classical', color: 'from-emerald-500 to-teal-500', description: 'Orchestral works and timeless compositions' },
 ]
 
-const decades = [
-  { name: '2020s', year: 2020 },
-  { name: '2010s', year: 2010 },
-  { name: '2000s', year: 2000 },
-  { name: '1990s', year: 1990 },
-  { name: '1980s', year: 1980 },
-  { name: '1970s', year: 1970 },
-  { name: '1960s', year: 1960 },
-]
+const decades = [2020, 2010, 2000, 1990, 1980, 1970, 1960]
 
 const moods = [
   { name: 'Energetic', icon: '⚡', mood: 'energetic' },
@@ -39,119 +25,87 @@ const moods = [
 
 export default function ExplorePage() {
   return (
-    <div className="space-y-10">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white">Explore</h1>
-        <p className="text-surface-400 mt-1">
-          Discover new music by genre, decade, or mood
+    <div className="space-y-8">
+      <div className="rounded-2xl border border-surface-800 bg-gradient-to-br from-surface-900 to-surface-950 p-6 sm:p-8">
+        <h1 className="text-2xl sm:text-3xl font-bold text-white">Explore</h1>
+        <p className="text-surface-300 mt-2 max-w-2xl">
+          Discover music using browsing modes that map directly to real discovery logic: genres, decades, and mood profiles.
         </p>
       </div>
 
-      {/* Browse by Genre */}
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
           <Music className="w-5 h-5" />
-          Browse by Genre
+          Explore by genre
         </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {genres.map((genre) => (
             <Link
               key={genre.name}
               href={`/explore/genre/${encodeURIComponent(genre.name.toLowerCase())}`}
-              className={`aspect-square rounded-xl bg-gradient-to-br ${genre.color} p-4 flex items-end hover:scale-105 transition-transform`}
+              className={`rounded-xl bg-gradient-to-br ${genre.color} p-5 hover:scale-[1.01] transition-transform`}
             >
-              <span className="text-white font-bold text-lg">{genre.name}</span>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-white font-semibold text-lg">{genre.name}</h3>
+                  <p className="text-white/85 text-sm mt-1">{genre.description}</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-white/80 mt-1" />
+              </div>
             </Link>
           ))}
         </div>
       </section>
 
-      {/* Browse by Decade */}
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Clock className="w-5 h-5" />
-          Time Machine
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4">
-          {decades.map((decade) => (
-            <Link
-              key={decade.year}
-              href={`/explore/decade/${decade.year}`}
-              className="card-hover p-4 text-center"
-            >
-              <span className="text-2xl font-bold text-white">{decade.name}</span>
-            </Link>
-          ))}
-        </div>
-      </section>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <section className="card p-5">
+          <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+            <Clock className="w-5 h-5" />
+            Explore by decade
+          </h2>
+          <p className="text-sm text-surface-400 mb-4">Find standout albums and artists from a specific era.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {decades.map((year) => (
+              <Link
+                key={year}
+                href={`/explore/decade/${year}`}
+                className="rounded-lg bg-surface-800 px-3 py-4 text-center text-white font-medium hover:bg-surface-700 transition-colors"
+              >
+                {year}s
+              </Link>
+            ))}
+          </div>
+        </section>
 
-      {/* Browse by Mood */}
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Heart className="w-5 h-5" />
-          Browse by Mood
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-          {moods.map((mood) => (
-            <Link
-              key={mood.mood}
-              href={`/explore/mood/${mood.mood}`}
-              className="card-hover p-6 text-center"
-            >
-              <span className="text-3xl mb-2 block">{mood.icon}</span>
-              <span className="text-white font-medium">{mood.name}</span>
-            </Link>
-          ))}
-        </div>
-      </section>
+        <section className="card p-5">
+          <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+            <Heart className="w-5 h-5" />
+            Explore by mood
+          </h2>
+          <p className="text-sm text-surface-400 mb-4">Use audio features to surface tracks and albums for the moment.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {moods.map((mood) => (
+              <Link
+                key={mood.mood}
+                href={`/explore/mood/${mood.mood}`}
+                className="rounded-lg bg-surface-800 p-3 text-center hover:bg-surface-700 transition-colors"
+              >
+                <div className="text-xl mb-1">{mood.icon}</div>
+                <div className="text-white text-sm font-medium">{mood.name}</div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      </div>
 
-      {/* Quick Links */}
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Sparkles className="w-5 h-5" />
-          Quick Discover
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <Link
-            href="/explore/new-releases"
-            className="card-hover p-6 flex items-center gap-4"
-          >
-            <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-white">New Releases</h3>
-              <p className="text-sm text-surface-400">Latest albums this week</p>
-            </div>
-          </Link>
-
-          <Link
-            href="/explore/trending"
-            className="card-hover p-6 flex items-center gap-4"
-          >
-            <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
-              <Compass className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-white">Trending</h3>
-              <p className="text-sm text-surface-400">What&apos;s popular now</p>
-            </div>
-          </Link>
-
-          <Link
-            href="/explore/underrated"
-            className="card-hover p-6 flex items-center gap-4"
-          >
-            <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-              <Heart className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-white">Hidden Gems</h3>
-              <p className="text-sm text-surface-400">Underrated discoveries</p>
-            </div>
-          </Link>
-        </div>
+      <section className="rounded-xl border border-primary-500/20 bg-primary-500/10 p-4 sm:p-5">
+        <h3 className="text-white font-semibold flex items-center gap-2">
+          <Compass className="w-4 h-4" />
+          Why this layout?
+        </h3>
+        <p className="text-surface-300 text-sm mt-1">
+          Each tile routes to an implemented discovery endpoint, avoiding dead links and reducing mismatches between UI categories and returned music.
+        </p>
       </section>
     </div>
   )

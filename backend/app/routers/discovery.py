@@ -1,7 +1,7 @@
 """Discovery endpoints for new music exploration."""
 
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from collections import Counter
 
 from fastapi import APIRouter, Depends, Query
@@ -21,6 +21,25 @@ from app.services.deezer import deezer_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _tokenize(text: str) -> List[str]:
+    return [t for t in (text or '').lower().replace('&', ' ').replace('-', ' ').split() if t]
+
+
+def _contains_any_token(text: str, tokens: List[str]) -> bool:
+    haystack = (text or '').lower()
+    return any(token in haystack for token in tokens if len(token) > 2)
+
+
+def _deezer_cover(album: Dict[str, Any]) -> Optional[str]:
+    return (
+        album.get('cover_xl')
+        or album.get('cover_big')
+        or album.get('cover_medium')
+        or album.get('cover')
+        or album.get('cover_small')
+    )
 
 
 class DiscoveryPlaylist(BaseModel):
@@ -465,11 +484,21 @@ async def explore_genre(
             )
 
     deezer_tracks = await deezer_service.search_tracks(
-        f'genre:"{genre}"', limit=max(20, min(limit * 2, 100))
+        f'genre:"{genre}"', limit=max(40, min(limit * 3, 150))
     )
+    genre_tokens = _tokenize(genre)
     for track in deezer_tracks:
         artist = track.get("artist") or {}
         album = track.get("album") or {}
+        title_blob = " ".join(
+            [
+                track.get("title", ""),
+                artist.get("name", ""),
+                album.get("title", ""),
+            ]
+        )
+        if genre_tokens and not _contains_any_token(title_blob, genre_tokens):
+            continue
 
         if artist.get("id") and not any(
             str(a.get("id")) == f"deezer:{artist['id']}" for a in artists
@@ -496,9 +525,7 @@ async def explore_genre(
                     "id": f"deezer:{album['id']}",
                     "title": album.get("title", ""),
                     "artist_name": artist.get("name", ""),
-                    "cover_url": album.get("cover_xl")
-                    or album.get("cover_big")
-                    or album.get("cover"),
+                    "cover_url": _deezer_cover(album),
                     "release_year": (
                         int(album.get("release_date", "")[:4])
                         if album.get("release_date")
@@ -582,7 +609,7 @@ async def explore_decade(
             break
 
     deezer_tracks = await deezer_service.search_tracks(
-        str(decade), limit=max(20, min(limit * 2, 100))
+        f"year:{decade_start}-{decade_end}", limit=max(40, min(limit * 3, 150))
     )
     for track in deezer_tracks:
         album = track.get("album") or {}
@@ -599,9 +626,7 @@ async def explore_decade(
                     "id": f"deezer:{album['id']}",
                     "title": album.get("title", ""),
                     "artist_name": artist.get("name", ""),
-                    "cover_url": album.get("cover_xl")
-                    or album.get("cover_big")
-                    or album.get("cover"),
+                    "cover_url": _deezer_cover(album),
                     "release_year": year,
                     "in_library": False,
                     "source": "deezer",
@@ -661,12 +686,12 @@ async def explore_mood(
         },
     }
     mood_queries = {
-        "energetic": "high energy workout",
+        "energetic": "energetic dance",
         "chill": "chill ambient",
         "sad": "sad acoustic",
         "happy": "happy pop",
-        "focus": "focus instrumental",
-        "workout": "workout gym",
+        "focus": "instrumental focus",
+        "workout": "workout cardio",
     }
 
     profile = mood_profiles.get(mood, {})
@@ -733,11 +758,15 @@ async def explore_mood(
                 )
 
     deezer_tracks = await deezer_service.search_tracks(
-        mood_queries.get(mood, mood), limit=max(20, min(limit * 2, 100))
+        mood_queries.get(mood, mood), limit=max(40, min(limit * 3, 150))
     )
+    mood_tokens = _tokenize(mood_queries.get(mood, mood))
     for track in deezer_tracks:
         artist = track.get("artist") or {}
         album = track.get("album") or {}
+        title_blob = " ".join([track.get("title", ""), artist.get("name", ""), album.get("title", "")])
+        if mood_tokens and not _contains_any_token(title_blob, mood_tokens):
+            continue
 
         tracks.append(
             {
@@ -759,9 +788,7 @@ async def explore_mood(
                     "id": f"deezer:{album['id']}",
                     "title": album.get("title", ""),
                     "artist_name": artist.get("name", ""),
-                    "cover_url": album.get("cover_xl")
-                    or album.get("cover_big")
-                    or album.get("cover"),
+                    "cover_url": _deezer_cover(album),
                     "in_library": False,
                     "source": "deezer",
                 }
