@@ -2,7 +2,7 @@
 
 from typing import Optional, List
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,6 +98,20 @@ class DownloadStatsResponse(BaseModel):
     completed: int
     failed: int
     active_client_downloads: int
+
+
+class BulkDeleteRequest(BaseModel):
+    """Bulk delete request for downloads."""
+    download_ids: Optional[List[int]] = None
+    all: bool = False
+    scope: str = "all"
+
+
+class BulkDeleteResponse(BaseModel):
+    """Bulk delete response for downloads."""
+    deleted: int
+    failed: int
+    deleted_ids: List[int]
 
 
 # --- Endpoints ---
@@ -303,6 +317,68 @@ async def cancel_download(
     await db.commit()
 
     return {"status": "cancelled", "id": download_id}
+
+
+@router.delete("/bulk/delete", response_model=BulkDeleteResponse)
+async def delete_downloads_bulk(
+    request: BulkDeleteRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete selected downloads or clear queue/history."""
+    valid_scopes = {"all", "queue", "history"}
+    scope = request.scope if request.scope in valid_scopes else "all"
+
+    active_statuses = [
+        DownloadStatus.PENDING,
+        DownloadStatus.SEARCHING,
+        DownloadStatus.FOUND,
+        DownloadStatus.QUEUED,
+        DownloadStatus.DOWNLOADING,
+        DownloadStatus.IMPORTING,
+    ]
+    history_statuses = [
+        DownloadStatus.COMPLETED,
+        DownloadStatus.FAILED,
+        DownloadStatus.CANCELLED,
+    ]
+
+    query = select(Download)
+    if request.all:
+        if scope == "queue":
+            query = query.where(Download.status.in_(active_statuses))
+        elif scope == "history":
+            query = query.where(Download.status.in_(history_statuses))
+    else:
+        ids = request.download_ids or []
+        if not ids:
+            raise HTTPException(status_code=400, detail="download_ids required when all=false")
+        query = query.where(Download.id.in_(ids))
+
+    result = await db.execute(query)
+    downloads = result.scalars().all()
+
+    deleted_ids: List[int] = []
+    failed = 0
+
+    for download in downloads:
+        try:
+            if download.download_id and download_client_service.is_configured:
+                await download_client_service.delete_torrent(
+                    download.download_id,
+                    delete_files=True,
+                )
+            await db.delete(download)
+            deleted_ids.append(download.id)
+        except Exception:
+            failed += 1
+
+    await db.commit()
+
+    return BulkDeleteResponse(
+        deleted=len(deleted_ids),
+        failed=failed,
+        deleted_ids=deleted_ids,
+    )
 
 
 @router.post("/{download_id}/retry", response_model=DownloadResponse)

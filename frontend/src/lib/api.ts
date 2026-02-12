@@ -726,6 +726,10 @@ export const downloadsApi = {
   add: (data: { artist_name: string; album_title: string; preferred_format?: string; album_id?: number; wishlist_id?: number }) =>
     api.post<Download>('/api/downloads', data),
   cancel: (id: number) => api.delete(`/api/downloads/${id}`),
+  deleteSelected: (download_ids: number[]) =>
+    api.delete('/api/downloads/bulk/delete', { data: { download_ids } }),
+  deleteAll: (scope: 'all' | 'queue' | 'history' = 'all') =>
+    api.delete('/api/downloads/bulk/delete', { data: { all: true, scope } }),
   retry: (id: number) => api.post<Download>(`/api/downloads/${id}/retry`),
   pause: (id: number) => api.post(`/api/downloads/${id}/pause`),
   resume: (id: number) => api.post(`/api/downloads/${id}/resume`),
