@@ -189,6 +189,8 @@ async def _process_wishlist_async(search_all=False):
                                 guid=best_result.get("guid"),
                                 indexer_id=best_result.get("indexer_id"),
                                 protocol=best_result.get("protocol"),
+                                download_url=best_result.get("download_url"),
+                                release_title=best_result.get("title"),
                             )
                             grabbed += 1
                         else:
@@ -292,6 +294,8 @@ async def _search_wishlist_item_async(item_id: int):
                     guid=best_result.get("guid"),
                     indexer_id=best_result.get("indexer_id"),
                     protocol=best_result.get("protocol"),
+                    download_url=best_result.get("download_url"),
+                    release_title=best_result.get("title"),
                 )
 
                 return {
@@ -397,19 +401,32 @@ async def _search_for_album_async(
 
 
 @celery_app.task(name="app.tasks.downloads.grab_release")
-def grab_release(download_id: int, guid: str, indexer_id: int, protocol: str = None):
+def grab_release(
+    download_id: int,
+    guid: str,
+    indexer_id: int,
+    protocol: str = None,
+    download_url: str = None,
+    release_title: str = None,
+):
     """Grab a release and send to download client."""
-    return _run_async(_grab_release_async(download_id, guid, indexer_id, protocol))
+    return _run_async(
+        _grab_release_async(download_id, guid, indexer_id, protocol, download_url, release_title)
+    )
 
 
-async def _grab_release_async(download_id: int, guid: str, indexer_id: int, protocol: str = None):
+async def _grab_release_async(
+    download_id: int,
+    guid: str,
+    indexer_id: int,
+    protocol: str = None,
+    download_url: str = None,
+    release_title: str = None,
+):
     """Async implementation of release grab."""
     logger.info(f"Grabbing release for download {download_id}")
 
     await cfg.ensure_cache()
-
-    if not prowlarr_service.is_available:
-        return {"status": "error", "message": "Prowlarr not available"}
 
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
@@ -426,10 +443,57 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int, prot
             download.status = DownloadStatus.QUEUED
             await db.commit()
 
-            # Grab via Prowlarr (sends to download client)
-            grab_result = await prowlarr_service.grab(guid, indexer_id)
-            grab_success = bool(grab_result.get("success"))
-            download_client_id = grab_result.get("download_id")
+            if not download_url:
+                download.status = DownloadStatus.FAILED
+                download.status_message = "No download URL available for release"
+                await db.commit()
+                await _sync_wishlist_status(
+                    db,
+                    download,
+                    WishlistStatus.FAILED,
+                    message=download.status_message,
+                )
+                return {"status": "error", "message": download.status_message}
+
+            grab_success = False
+            download_client_id = None
+
+            if protocol == "usenet":
+                if not (sabnzbd_service.is_configured and cfg.get_bool("sabnzbd_enabled")):
+                    download.status = DownloadStatus.FAILED
+                    download.status_message = "SABnzbd not configured"
+                    await db.commit()
+                    await _sync_wishlist_status(
+                        db,
+                        download,
+                        WishlistStatus.FAILED,
+                        message=download.status_message,
+                    )
+                    return {"status": "error", "message": download.status_message}
+
+                download_client_id = await sabnzbd_service.add_nzb_url(
+                    download_url,
+                    name=release_title or download.release_title,
+                )
+                grab_success = bool(download_client_id)
+            else:
+                if not download_client_service.is_configured:
+                    download.status = DownloadStatus.FAILED
+                    download.status_message = "qBittorrent not configured"
+                    await db.commit()
+                    await _sync_wishlist_status(
+                        db,
+                        download,
+                        WishlistStatus.FAILED,
+                        message=download.status_message,
+                    )
+                    return {"status": "error", "message": download.status_message}
+
+                grab_success = await download_client_service.add_torrent_url(download_url)
+                if grab_success:
+                    download_client_id = await download_client_service.find_torrent_hash(
+                        release_title=release_title or download.release_title or "",
+                    )
 
             if grab_success:
                 download.status = DownloadStatus.DOWNLOADING
@@ -437,9 +501,7 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int, prot
                     download.download_id = str(download_client_id)
                     download.status_message = None
                 else:
-                    download.status_message = (
-                        "Prowlarr acknowledged release grab; waiting for download client to report ID"
-                    )
+                    download.status_message = "Added to download client; waiting for download ID"
 
                 # Record which download client handles this release
                 if protocol == "usenet":
@@ -463,7 +525,7 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int, prot
                 }
             else:
                 download.status = DownloadStatus.FAILED
-                download.status_message = "Failed to grab release from Prowlarr"
+                download.status_message = "Failed to add release to download client"
                 await db.commit()
                 await _sync_wishlist_status(
                     db,

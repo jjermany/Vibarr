@@ -130,16 +130,18 @@ class _FakeProwlarrSearch:
         return self.results
 
 
-class _FakeProwlarrGrab:
-    is_available = True
+class _FakeDirectDownloadClient:
+    is_configured = True
 
-    def __init__(self, grab_result):
-        self.grab_result = grab_result
+    def __init__(self, add_success=True, torrent_hash=None):
+        self.add_success = add_success
+        self.torrent_hash = torrent_hash
 
-    async def grab(self, *_args, **_kwargs):
-        if isinstance(self.grab_result, dict):
-            return self.grab_result
-        return {"success": bool(self.grab_result), "download_id": self.grab_result}
+    async def add_torrent_url(self, _url):
+        return self.add_success
+
+    async def find_torrent_hash(self, release_title):
+        return self.torrent_hash
 
 
 class _FakeImportResult:
@@ -230,12 +232,14 @@ async def test_search_wishlist_item_async_creates_download_metadata_from_prowlar
                     "leechers": 2,
                     "score": 97,
                     "guid": "guid-1",
+                    "download_url": "https://example.com/guid-1.torrent",
                 }
             ]
         ),
     )
     monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
     monkeypatch.setattr(downloads.cfg, "get_bool", lambda *args, **kwargs: False)
+    monkeypatch.setattr(downloads.grab_release, "delay", lambda **kwargs: None)
 
     payload = await downloads._search_wishlist_item_async(item_id=1)
 
@@ -268,9 +272,16 @@ async def test_grab_and_import_status_propagation_updates_download_and_wishlist(
 
     monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
     monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
-    monkeypatch.setattr(downloads, "prowlarr_service", _FakeProwlarrGrab("client-id"))
+    monkeypatch.setattr(downloads, "download_client_service", _FakeDirectDownloadClient(add_success=True, torrent_hash="client-id"))
 
-    grabbed = await downloads._grab_release_async(download_id=200, guid="g", indexer_id=1)
+    grabbed = await downloads._grab_release_async(
+        download_id=200,
+        guid="g",
+        indexer_id=1,
+        protocol="torrent",
+        download_url="https://example.com/g.torrent",
+        release_title="Artist - Album",
+    )
 
     assert grabbed["status"] == "grabbed"
     assert download.status == DownloadStatus.DOWNLOADING
@@ -297,13 +308,13 @@ async def test_grab_and_import_status_propagation_updates_download_and_wishlist(
         (
             "grab_failure",
             lambda monkeypatch: monkeypatch.setattr(
-                downloads, "prowlarr_service", _FakeProwlarrGrab(None)
+                downloads, "download_client_service", _FakeDirectDownloadClient(add_success=False)
             ),
             lambda result, download, wishlist: (
                 result["status"] == "error"
                 and download.status == DownloadStatus.FAILED
                 and wishlist.status == WishlistStatus.FAILED
-                and "Failed to grab" in (wishlist.notes or "")
+                and "Failed to add release" in (wishlist.notes or "")
             ),
         ),
         (
@@ -360,7 +371,14 @@ async def test_failure_paths_are_user_visible_and_recoverable(
     setup(monkeypatch)
 
     if scenario == "grab_failure":
-        result = await downloads._grab_release_async(download_id=300, guid="g", indexer_id=1)
+        result = await downloads._grab_release_async(
+            download_id=300,
+            guid="g",
+            indexer_id=1,
+            protocol="torrent",
+            download_url="https://example.com/g.torrent",
+            release_title="Artist - Album",
+        )
     else:
         result = await downloads._import_completed_download_async(download_id=300)
 
