@@ -218,8 +218,11 @@ class ProwlarrService:
             return None
 
         try:
+            # Prowlarr v1 API handles grabs via POST /api/v1/search
+            # with a payload containing the guid and indexer ID.
+            grab_endpoint = "/api/v1/search"
             response = await self.client.post(
-                "/api/v1/search",
+                grab_endpoint,
                 json={
                     "guid": guid,
                     "indexerId": indexer_id,

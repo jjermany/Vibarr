@@ -1,3 +1,7 @@
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+
 from app.services.prowlarr import ProwlarrService
 
 
@@ -98,3 +102,26 @@ def test_score_result_handles_non_numeric_fields():
     assert isinstance(score, float)
     assert "text_relevance" in non_numeric_match
     assert "passes_text_relevance" in non_numeric_match
+
+
+@pytest.mark.asyncio
+async def test_grab_posts_expected_payload_and_returns_id(monkeypatch):
+    service = ProwlarrService()
+
+    response = Mock()
+    response.json.return_value = {"id": "grab-123"}
+    response.raise_for_status.return_value = None
+
+    client = AsyncMock()
+    client.is_closed = False
+    client.post.return_value = response
+
+    monkeypatch.setattr(service, "_client", client)
+
+    result = await service.grab(guid="abc-guid", indexer_id=42)
+
+    assert result == "grab-123"
+    client.post.assert_awaited_once()
+    args, kwargs = client.post.await_args
+    assert args == ("/api/v1/search",)
+    assert kwargs["json"] == {"guid": "abc-guid", "indexerId": 42}
