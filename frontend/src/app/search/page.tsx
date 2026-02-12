@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 type SearchType = 'all' | 'artists' | 'albums' | 'tracks'
+type AddBehavior = 'wishlist_only' | 'search_now' | 'auto_download'
 
 const SEARCH_TYPE_TO_API: Record<SearchType, string | undefined> = {
   all: undefined,
@@ -53,6 +54,7 @@ function SearchPageContent() {
   const [searchType, setSearchType] = useState<SearchType>('all')
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery)
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
+  const [addBehavior, setAddBehavior] = useState<AddBehavior>('wishlist_only')
 
   // Playlist URL resolution state
   const [playlistResult, setPlaylistResult] = useState<PlaylistResolveResult | null>(null)
@@ -103,23 +105,26 @@ function SearchPageContent() {
     try {
       const isAlbum = item.type === 'album'
       const isTrack = item.type === 'track'
-      await wishlistApi.create({
+      const createdItem = await wishlistApi.create({
         item_type: isAlbum ? 'album' : isTrack ? 'track' : 'artist',
         artist_name: item.artist_name || ((isAlbum || isTrack) ? undefined : item.name),
         album_title: isAlbum ? item.name : isTrack ? `${item.name}${item.album_name ? ` · ${item.album_name}` : ''}` : undefined,
         musicbrainz_id: item.external_ids?.musicbrainz_id,
         image_url: item.image_url,
         priority: 'normal',
-        auto_download: false,
+        auto_download: addBehavior === 'auto_download',
         notes: isTrack ? 'Track request from discover/search' : undefined,
       })
+      if (addBehavior !== 'wishlist_only') {
+        await wishlistApi.search(createdItem.data.id)
+      }
       queryClient.invalidateQueries({ queryKey: ['wishlist'] })
       toast.success(`Added "${item.name}" to wishlist`)
       setPreviewItem(null)
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to add to wishlist')
     }
-  }, [queryClient])
+  }, [addBehavior, queryClient])
 
   // ---- Playlist URL handlers ----
 
@@ -140,29 +145,35 @@ function SearchPageContent() {
     let added = 0
     try {
       // 1. Create the playlist-level wishlist item
-      await wishlistApi.create({
+      const createdPlaylistItem = await wishlistApi.create({
         item_type: 'playlist',
         artist_name: playlist.creator || undefined,
         album_title: playlist.title,
         image_url: playlist.image_url,
         priority: 'normal',
-        auto_download: false,
+        auto_download: addBehavior === 'auto_download',
         notes: `Playlist URL: ${playlist.url}`,
       })
+      if (addBehavior !== 'wishlist_only') {
+        await wishlistApi.search(createdPlaylistItem.data.id)
+      }
       added++
 
       // 2. Create individual track items
       for (const track of playlist.tracks) {
         try {
-          await wishlistApi.create({
+          const createdTrackItem = await wishlistApi.create({
             item_type: 'track',
             artist_name: track.artist_name || undefined,
             album_title: `${track.name}${track.album_name ? ` \u00b7 ${track.album_name}` : ''}`,
             image_url: track.image_url,
             priority: 'normal',
-            auto_download: false,
+            auto_download: addBehavior === 'auto_download',
             notes: `From playlist: ${playlist.title}`,
           })
+          if (addBehavior !== 'wishlist_only') {
+            await wishlistApi.search(createdTrackItem.data.id)
+          }
           added++
         } catch {
           // Skip duplicates / failures for individual tracks
@@ -175,25 +186,28 @@ function SearchPageContent() {
     } finally {
       setIsAddingPlaylist(false)
     }
-  }, [queryClient])
+  }, [addBehavior, queryClient])
 
   const handleAddSingleTrack = useCallback(async (track: PlaylistTrack, playlistTitle: string) => {
     try {
-      await wishlistApi.create({
+      const createdTrackItem = await wishlistApi.create({
         item_type: 'track',
         artist_name: track.artist_name || undefined,
         album_title: `${track.name}${track.album_name ? ` \u00b7 ${track.album_name}` : ''}`,
         image_url: track.image_url,
         priority: 'normal',
-        auto_download: false,
+        auto_download: addBehavior === 'auto_download',
         notes: `From playlist: ${playlistTitle}`,
       })
+      if (addBehavior !== 'wishlist_only') {
+        await wishlistApi.search(createdTrackItem.data.id)
+      }
       queryClient.invalidateQueries({ queryKey: ['wishlist'] })
       toast.success(`Added "${track.name}" to wishlist`)
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to add track to wishlist')
     }
-  }, [queryClient])
+  }, [addBehavior, queryClient])
 
   return (
     <div className="space-y-6">
@@ -217,6 +231,45 @@ function SearchPageContent() {
       </div>
 
       {/* Playlist URL detected banner */}
+      <div className="max-w-2xl rounded-lg border border-surface-700 bg-surface-900/50 p-3">
+        <p className="text-xs font-medium text-surface-300 mb-2">After adding to wishlist</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setAddBehavior('wishlist_only')}
+            className={cn(
+              'px-3 py-1.5 rounded-md text-xs transition-colors',
+              addBehavior === 'wishlist_only'
+                ? 'bg-primary-500/20 text-primary-300'
+                : 'bg-surface-800 text-surface-400 hover:text-white'
+            )}
+          >
+            Wishlist only
+          </button>
+          <button
+            onClick={() => setAddBehavior('search_now')}
+            className={cn(
+              'px-3 py-1.5 rounded-md text-xs transition-colors',
+              addBehavior === 'search_now'
+                ? 'bg-primary-500/20 text-primary-300'
+                : 'bg-surface-800 text-surface-400 hover:text-white'
+            )}
+          >
+            Search now
+          </button>
+          <button
+            onClick={() => setAddBehavior('auto_download')}
+            className={cn(
+              'px-3 py-1.5 rounded-md text-xs transition-colors',
+              addBehavior === 'auto_download'
+                ? 'bg-primary-500/20 text-primary-300'
+                : 'bg-surface-800 text-surface-400 hover:text-white'
+            )}
+          >
+            Auto-download
+          </button>
+        </div>
+      </div>
+
       {urlIsPlaylist && backendReady && !playlistResult && (
         <div className="flex items-center gap-3 p-3 bg-surface-800 rounded-lg border border-orange-500/30 max-w-2xl">
           <ListMusic className="w-5 h-5 text-orange-400 flex-shrink-0" />
