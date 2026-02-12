@@ -179,13 +179,16 @@ async def _process_wishlist_async(search_all=False):
                         # Check concurrent download limit
                         active_count = 0
                         if download_client_service.is_configured:
-                            active_count = await download_client_service.get_active_count()
+                            active_count += await download_client_service.get_active_count()
+                        if sabnzbd_service.is_configured and cfg.get_bool("sabnzbd_enabled"):
+                            active_count += await sabnzbd_service.get_active_count()
 
                         if active_count < cfg.get_int("max_concurrent_downloads", 3):
                             grab_release.delay(
                                 download_id=download.id,
                                 guid=best_result.get("guid"),
                                 indexer_id=best_result.get("indexer_id"),
+                                protocol=best_result.get("protocol"),
                             )
                             grabbed += 1
                         else:
@@ -291,13 +294,16 @@ async def _search_wishlist_item_async(item_id: int):
                 ):
                     active_count = 0
                     if download_client_service.is_configured:
-                        active_count = await download_client_service.get_active_count()
+                        active_count += await download_client_service.get_active_count()
+                    if sabnzbd_service.is_configured and cfg.get_bool("sabnzbd_enabled"):
+                        active_count += await sabnzbd_service.get_active_count()
 
                     if active_count < cfg.get_int("max_concurrent_downloads", 3):
                         grab_release.delay(
                             download_id=download.id,
                             guid=best_result.get("guid"),
                             indexer_id=best_result.get("indexer_id"),
+                            protocol=best_result.get("protocol"),
                         )
                     else:
                         logger.info(
@@ -408,12 +414,12 @@ async def _search_for_album_async(
 
 
 @celery_app.task(name="app.tasks.downloads.grab_release")
-def grab_release(download_id: int, guid: str, indexer_id: int):
+def grab_release(download_id: int, guid: str, indexer_id: int, protocol: str = None):
     """Grab a release and send to download client."""
-    return _run_async(_grab_release_async(download_id, guid, indexer_id))
+    return _run_async(_grab_release_async(download_id, guid, indexer_id, protocol))
 
 
-async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
+async def _grab_release_async(download_id: int, guid: str, indexer_id: int, protocol: str = None):
     """Async implementation of release grab."""
     logger.info(f"Grabbing release for download {download_id}")
 
@@ -451,6 +457,13 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
                     download.status_message = (
                         "Prowlarr acknowledged release grab; waiting for download client to report ID"
                     )
+
+                # Record which download client handles this release
+                if protocol == "usenet":
+                    download.download_client = "sabnzbd"
+                elif protocol == "torrent":
+                    download.download_client = "qbittorrent"
+
                 download.started_at = datetime.utcnow()
                 await db.commit()
 
@@ -491,14 +504,129 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
             return {"status": "error", "message": str(e)}
 
 
+def _parse_sab_eta(eta_str: str) -> int | None:
+    """Parse SABnzbd timeleft string 'H:MM:SS' to total seconds."""
+    if not eta_str:
+        return None
+    try:
+        parts = eta_str.split(":")
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
+async def _check_qbittorrent_download(db, download: Download, completed_dir: str) -> bool:
+    """Check a single qBittorrent download. Returns True if it completed."""
+    torrent = await download_client_service.get_torrent(download.download_id)
+
+    if not torrent:
+        logger.warning(
+            f"Torrent {download.download_id} not found in client "
+            f"for download {download.id}"
+        )
+        return False
+
+    # Update progress info
+    download.progress = torrent.progress
+    download.download_speed = torrent.dl_speed
+    download.eta_seconds = torrent.eta if torrent.eta < 8640000 else None
+    download.download_path = torrent.content_path or torrent.save_path
+
+    if torrent.is_complete:
+        download.progress = 100.0
+        download.completed_at = datetime.utcnow()
+        download.download_speed = None
+        download.eta_seconds = None
+
+        final_path = torrent.content_path or torrent.save_path
+        if completed_dir and final_path:
+            download.download_path = final_path
+
+        if cfg.get_bool("beets_enabled") and cfg.get_bool("beets_auto_import", True):
+            import_completed_download.delay(download_id=download.id)
+            download.status = DownloadStatus.IMPORTING
+            await _sync_wishlist_status(db, download, WishlistStatus.IMPORTING)
+        else:
+            download.status = DownloadStatus.COMPLETED
+            await _sync_wishlist_status(db, download, WishlistStatus.DOWNLOADED)
+
+        if cfg.get_bool("qbittorrent_remove_completed"):
+            await download_client_service.delete_torrent(
+                download.download_id, delete_files=False
+            )
+        return True
+
+    elif torrent.is_errored:
+        download.status = DownloadStatus.FAILED
+        download.status_message = f"Download client error: {torrent.state}"
+        download.completed_at = datetime.utcnow()
+        await _sync_wishlist_status(
+            db, download, WishlistStatus.FAILED, message=download.status_message
+        )
+
+    return False
+
+
+async def _check_sabnzbd_download(db, download: Download) -> bool:
+    """Check a single SABnzbd download. Returns True if it completed."""
+    nzb = await sabnzbd_service.get_download(download.download_id)
+
+    if not nzb:
+        logger.warning(
+            f"NZB {download.download_id} not found in SABnzbd "
+            f"for download {download.id}"
+        )
+        return False
+
+    # Update progress info
+    download.progress = nzb.progress
+    download.download_speed = None
+    download.eta_seconds = _parse_sab_eta(nzb.eta)
+    if nzb.storage:
+        download.download_path = nzb.storage
+
+    if nzb.is_complete:
+        download.progress = 100.0
+        download.completed_at = datetime.utcnow()
+        download.download_speed = None
+        download.eta_seconds = None
+        if nzb.storage:
+            download.download_path = nzb.storage
+
+        if cfg.get_bool("beets_enabled") and cfg.get_bool("beets_auto_import", True):
+            import_completed_download.delay(download_id=download.id)
+            download.status = DownloadStatus.IMPORTING
+            await _sync_wishlist_status(db, download, WishlistStatus.IMPORTING)
+        else:
+            download.status = DownloadStatus.COMPLETED
+            await _sync_wishlist_status(db, download, WishlistStatus.DOWNLOADED)
+
+        # SABnzbd history cleanup is handled in _import_completed_download_async
+        return True
+
+    elif nzb.is_errored:
+        download.status = DownloadStatus.FAILED
+        download.status_message = f"SABnzbd download failed: {nzb.status}"
+        download.completed_at = datetime.utcnow()
+        await _sync_wishlist_status(
+            db, download, WishlistStatus.FAILED, message=download.status_message
+        )
+
+    return False
+
+
 @celery_app.task(name="app.tasks.downloads.check_download_status")
 def check_download_status():
-    """Check status of active downloads via qBittorrent."""
+    """Check status of active downloads via qBittorrent and SABnzbd."""
     return _run_async(_check_download_status_async())
 
 
 async def _check_download_status_async():
-    """Check and update download statuses from qBittorrent.
+    """Check and update download statuses from qBittorrent and SABnzbd.
 
     Handles the incomplete → completed path flow: when qBittorrent finishes
     a torrent it moves files from the incomplete/cache path to the completed
@@ -507,8 +635,11 @@ async def _check_download_status_async():
     """
     logger.info("Checking download statuses")
 
-    if not download_client_service.is_configured:
-        return {"status": "skipped", "reason": "Download client not configured"}
+    qbit_configured = download_client_service.is_configured
+    sab_configured = sabnzbd_service.is_configured and cfg.get_bool("sabnzbd_enabled")
+
+    if not qbit_configured and not sab_configured:
+        return {"status": "skipped", "reason": "No download client configured"}
 
     await cfg.ensure_cache()
 
@@ -537,74 +668,32 @@ async def _check_download_status_async():
 
         for download in active_downloads:
             try:
-                torrent = await download_client_service.get_torrent(
-                    download.download_id
-                )
+                client_type = download.download_client
 
-                if not torrent:
+                if client_type == "sabnzbd":
+                    if not sab_configured:
+                        logger.warning(
+                            f"Download {download.id} assigned to SABnzbd but SABnzbd not configured"
+                        )
+                        continue
+                    was_completed = await _check_sabnzbd_download(db, download)
+                elif client_type == "qbittorrent" or client_type is None:
+                    # Default to qBittorrent for legacy records with no client set
+                    if not qbit_configured:
+                        logger.warning(
+                            f"Download {download.id} assigned to qBittorrent but qBittorrent not configured"
+                        )
+                        continue
+                    was_completed = await _check_qbittorrent_download(db, download, completed_dir)
+                else:
                     logger.warning(
-                        f"Torrent {download.download_id} not found in client "
-                        f"for download {download.id}"
+                        f"Download {download.id} has unknown download_client: {client_type}"
                     )
                     continue
 
-                # Update progress info
-                download.progress = torrent.progress
-                download.download_speed = torrent.dl_speed
-                download.eta_seconds = torrent.eta if torrent.eta < 8640000 else None
-                # Always track the latest content path from qBittorrent
-                download.download_path = torrent.content_path or torrent.save_path
                 updated += 1
-
-                if torrent.is_complete:
-                    download.progress = 100.0
-                    download.completed_at = datetime.utcnow()
-                    download.download_speed = None
-                    download.eta_seconds = None
+                if was_completed:
                     completed += 1
-
-                    # When qBit moves files from incomplete to completed,
-                    # the content_path / save_path updates. Use the
-                    # completed directory setting as the canonical path if
-                    # the torrent's reported path lives there.
-                    final_path = torrent.content_path or torrent.save_path
-                    if completed_dir and final_path:
-                        download.download_path = final_path
-
-                    # Auto-import with beets if enabled (Arr-style)
-                    if cfg.get_bool("beets_enabled") and cfg.get_bool("beets_auto_import", True):
-                        import_completed_download.delay(download_id=download.id)
-                        download.status = DownloadStatus.IMPORTING
-                        await _sync_wishlist_status(
-                            db,
-                            download,
-                            WishlistStatus.IMPORTING,
-                        )
-                    else:
-                        download.status = DownloadStatus.COMPLETED
-                        await _sync_wishlist_status(
-                            db,
-                            download,
-                            WishlistStatus.DOWNLOADED,
-                        )
-
-                    # Optionally remove the torrent from qBittorrent after
-                    # import (like the Arrs do after a successful grab).
-                    if cfg.get_bool("qbittorrent_remove_completed"):
-                        await download_client_service.delete_torrent(
-                            download.download_id, delete_files=False
-                        )
-
-                elif torrent.is_errored:
-                    download.status = DownloadStatus.FAILED
-                    download.status_message = f"Download client error: {torrent.state}"
-                    download.completed_at = datetime.utcnow()
-                    await _sync_wishlist_status(
-                        db,
-                        download,
-                        WishlistStatus.FAILED,
-                        message=download.status_message,
-                    )
 
                 await db.commit()
 
@@ -644,14 +733,20 @@ async def _import_completed_download_async(download_id: int):
             return {"status": "error", "message": "Download not found"}
 
         if not download.download_path:
-            # Try to get path from download client
-            if download.download_id and download_client_service.is_configured:
-                torrent = await download_client_service.get_torrent(
-                    download.download_id
-                )
-                if torrent:
-                    download.download_path = torrent.content_path or torrent.save_path
-                    await db.commit()
+            # Try to get path from the appropriate download client
+            if download.download_id:
+                if download.download_client == "sabnzbd" and sabnzbd_service.is_configured:
+                    nzb = await sabnzbd_service.get_download(download.download_id)
+                    if nzb and nzb.storage:
+                        download.download_path = nzb.storage
+                        await db.commit()
+                elif download_client_service.is_configured:
+                    torrent = await download_client_service.get_torrent(
+                        download.download_id
+                    )
+                    if torrent:
+                        download.download_path = torrent.content_path or torrent.save_path
+                        await db.commit()
 
             if not download.download_path:
                 download.status = DownloadStatus.FAILED

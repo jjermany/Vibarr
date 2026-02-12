@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models.download import Download, DownloadStatus
 from app.services.prowlarr import prowlarr_service
 from app.services.download_client import download_client_service
+from app.services.sabnzbd import sabnzbd_service
 from app.services import app_settings as cfg
 
 router = APIRouter()
@@ -71,6 +72,7 @@ class SearchResultResponse(BaseModel):
     leechers: int
     download_url: Optional[str] = None
     score: float = 0.0
+    protocol: Optional[str] = None  # "torrent" or "usenet"
 
 
 class GrabRequest(BaseModel):
@@ -86,6 +88,7 @@ class GrabRequest(BaseModel):
     release_quality: Optional[str] = None
     seeders: Optional[int] = None
     indexer_name: Optional[str] = None
+    protocol: Optional[str] = None  # "torrent" or "usenet"
 
 
 class DownloadStatsResponse(BaseModel):
@@ -152,7 +155,9 @@ async def get_download_stats(db: AsyncSession = Depends(get_db)):
 
     active_client = 0
     if download_client_service.is_configured:
-        active_client = await download_client_service.get_active_count()
+        active_client += await download_client_service.get_active_count()
+    if sabnzbd_service.is_configured:
+        active_client += await sabnzbd_service.get_active_count()
 
     total = sum(status_counts.values())
 
@@ -307,10 +312,13 @@ async def cancel_download(
         raise HTTPException(status_code=400, detail="Download cannot be cancelled")
 
     # Cancel in download client if actively downloading
-    if download.download_id and download_client_service.is_configured:
-        await download_client_service.delete_torrent(
-            download.download_id, delete_files=True
-        )
+    if download.download_id:
+        if download.download_client == "sabnzbd" and sabnzbd_service.is_configured:
+            await sabnzbd_service.delete_download(download.download_id, del_files=True)
+        elif download_client_service.is_configured:
+            await download_client_service.delete_torrent(
+                download.download_id, delete_files=True
+            )
 
     download.status = DownloadStatus.CANCELLED
     download.completed_at = datetime.utcnow()
@@ -362,11 +370,14 @@ async def delete_downloads_bulk(
 
     for download in downloads:
         try:
-            if download.download_id and download_client_service.is_configured:
-                await download_client_service.delete_torrent(
-                    download.download_id,
-                    delete_files=True,
-                )
+            if download.download_id:
+                if download.download_client == "sabnzbd" and sabnzbd_service.is_configured:
+                    await sabnzbd_service.delete_download(download.download_id, del_files=True)
+                elif download_client_service.is_configured:
+                    await download_client_service.delete_torrent(
+                        download.download_id,
+                        delete_files=True,
+                    )
             await db.delete(download)
             deleted_ids.append(download.id)
         except Exception:
@@ -444,6 +455,7 @@ async def search_releases(
             leechers=r.get("leechers", 0),
             download_url=r.get("download_url"),
             score=r.get("score", 0),
+            protocol=r.get("protocol"),
         )
         for r in results
     ]
@@ -503,6 +515,7 @@ async def grab_release(
         download_id=download.id,
         guid=request.guid,
         indexer_id=request.indexer_id,
+        protocol=request.protocol,
     )
 
     await db.refresh(download)
@@ -524,8 +537,13 @@ async def pause_download(
     if download.status != DownloadStatus.DOWNLOADING:
         raise HTTPException(status_code=400, detail="Download is not actively downloading")
 
-    if download.download_id and download_client_service.is_configured:
-        success = await download_client_service.pause_torrent(download.download_id)
+    if download.download_id:
+        if download.download_client == "sabnzbd" and sabnzbd_service.is_configured:
+            success = await sabnzbd_service.pause_download(download.download_id)
+        elif download_client_service.is_configured:
+            success = await download_client_service.pause_torrent(download.download_id)
+        else:
+            success = False
         if not success:
             raise HTTPException(status_code=500, detail="Failed to pause in download client")
 
@@ -544,8 +562,13 @@ async def resume_download(
     if not download:
         raise HTTPException(status_code=404, detail="Download not found")
 
-    if download.download_id and download_client_service.is_configured:
-        success = await download_client_service.resume_torrent(download.download_id)
+    if download.download_id:
+        if download.download_client == "sabnzbd" and sabnzbd_service.is_configured:
+            success = await sabnzbd_service.resume_download(download.download_id)
+        elif download_client_service.is_configured:
+            success = await download_client_service.resume_torrent(download.download_id)
+        else:
+            success = False
         if not success:
             raise HTTPException(status_code=500, detail="Failed to resume in download client")
 
