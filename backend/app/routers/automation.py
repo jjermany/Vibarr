@@ -54,6 +54,7 @@ class RuleTestRequest(BaseModel):
 VALID_TRIGGERS = [
     "new_release", "library_sync", "recommendation_generated",
     "listening_milestone", "new_artist_discovered", "schedule",
+    "playlist_url_check",
 ]
 
 VALID_OPERATORS = [
@@ -64,7 +65,7 @@ VALID_OPERATORS = [
 VALID_ACTION_TYPES = [
     "add_to_wishlist", "start_download", "add_to_playlist",
     "send_notification", "tag_item", "set_quality_profile",
-    "skip_item", "add_to_library",
+    "skip_item", "add_to_library", "import_playlist_url",
 ]
 
 
@@ -175,6 +176,7 @@ async def list_triggers():
             {"value": "listening_milestone", "label": "Listening Milestone", "description": "Fires when a play count milestone is reached"},
             {"value": "new_artist_discovered", "label": "New Artist Discovered", "description": "Fires when a new artist is added to the library"},
             {"value": "schedule", "label": "Scheduled", "description": "Fires on a cron schedule"},
+            {"value": "playlist_url_check", "label": "Playlist URL Check", "description": "Periodically checks a playlist URL for new tracks to add to wishlist"},
         ],
         "operators": [
             {"value": "equals", "label": "Equals"},
@@ -196,6 +198,7 @@ async def list_triggers():
             {"value": "set_quality_profile", "label": "Set Quality Profile", "params": ["profile_name"]},
             {"value": "skip_item", "label": "Skip Item", "params": []},
             {"value": "add_to_library", "label": "Add to Library", "params": []},
+            {"value": "import_playlist_url", "label": "Import from Playlist URL", "params": ["url", "auto_download", "priority"]},
         ],
         "condition_fields": [
             "genre", "artist_name", "album_type", "album_title", "release_year",
@@ -203,6 +206,7 @@ async def list_triggers():
             "audio_tempo", "audio_acousticness", "audio_instrumentalness",
             "popularity", "seeders", "format", "quality", "play_count",
             "source", "category", "recommendation_type",
+            "playlist_url",
         ],
     }
 

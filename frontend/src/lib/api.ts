@@ -182,6 +182,7 @@ export interface WishlistCreateParams {
   album_title?: string
   musicbrainz_id?: string
   spotify_id?: string
+  image_url?: string
   priority?: string
   preferred_format?: string
   auto_download?: boolean
@@ -559,6 +560,29 @@ export interface AutomationStats {
   failed_executions: number
 }
 
+export interface PlaylistTrack {
+  id: string
+  name: string
+  artist_name?: string
+  album_name?: string
+  image_url?: string
+  duration_ms?: number
+  source: string
+  external_ids: Record<string, string>
+}
+
+export interface PlaylistResolveResult {
+  url: string
+  source: string
+  playlist_id: string
+  title: string
+  description?: string
+  image_url?: string
+  creator?: string
+  track_count: number
+  tracks: PlaylistTrack[]
+}
+
 // API Functions
 
 export const searchApi = {
@@ -572,6 +596,8 @@ export const searchApi = {
     api.get('/api/search/tracks', { params: { q: query, limit } }),
   preview: (type: string, name: string, artist?: string, source?: string) =>
     api.get<PreviewData>('/api/search/preview', { params: { type, name, artist, source } }),
+  resolvePlaylist: (url: string) =>
+    api.post<PlaylistResolveResult>('/api/search/resolve-playlist', null, { params: { url } }),
 }
 
 export const discoveryApi = {

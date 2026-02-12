@@ -156,6 +156,9 @@ async def execute_action(action: Dict, context: Dict[str, Any], db=None) -> Dict
         elif action_type == "add_to_library":
             result.update(await _action_add_to_library(context, params, db))
 
+        elif action_type == "import_playlist_url":
+            result.update(await _action_import_playlist_url(context, params, db))
+
         else:
             result["message"] = f"Unknown action type: {action_type}"
 
@@ -307,6 +310,113 @@ async def _action_add_to_library(context: Dict, params: Dict, db) -> Dict:
             return {"success": True, "message": f"Added album to library: {album.title}"}
 
     return {"success": False, "message": "Item not found"}
+
+
+async def _action_import_playlist_url(context: Dict, params: Dict, db) -> Dict:
+    """Import tracks from a playlist URL into the wishlist.
+
+    Resolves the playlist via Deezer or YouTube Music, creates a single
+    ``playlist`` wishlist item, plus individual ``track`` items for each
+    track not already present (deduplication by artist + title).
+    """
+    if not db:
+        return {"success": False, "message": "No database session"}
+
+    url = params.get("url", "")
+    if not url:
+        return {"success": False, "message": "No playlist URL specified"}
+
+    from app.routers.search import (
+        DEEZER_PLAYLIST_PATTERN,
+        YOUTUBE_PLAYLIST_PATTERN,
+        _resolve_deezer_playlist,
+        _resolve_youtube_playlist,
+    )
+    from app.models.wishlist import WishlistItem
+    from sqlalchemy import select, and_, func
+
+    try:
+        deezer_match = DEEZER_PLAYLIST_PATTERN.search(url)
+        youtube_match = YOUTUBE_PLAYLIST_PATTERN.search(url)
+
+        if deezer_match:
+            playlist = await _resolve_deezer_playlist(url, deezer_match.group(1))
+        elif youtube_match:
+            playlist = await _resolve_youtube_playlist(url, youtube_match.group(1))
+        else:
+            return {"success": False, "message": f"Unsupported playlist URL: {url}"}
+
+        priority = params.get("priority", "normal")
+        auto_download = params.get("auto_download", False)
+
+        added = 0
+
+        # Check if playlist-level item already exists (by title + type)
+        existing_playlist = await db.execute(
+            select(WishlistItem).where(
+                and_(
+                    func.lower(WishlistItem.album_title) == playlist.title.lower(),
+                    WishlistItem.item_type == "playlist",
+                )
+            )
+        )
+        if not existing_playlist.scalar_one_or_none():
+            playlist_item = WishlistItem(
+                item_type="playlist",
+                artist_name=playlist.creator or "",
+                album_title=playlist.title,
+                image_url=playlist.image_url,
+                status="wanted",
+                priority=priority,
+                source="automation",
+                auto_download=auto_download,
+                notes=f"Playlist URL: {url}",
+            )
+            db.add(playlist_item)
+            added += 1
+
+        # Add individual tracks, skipping duplicates
+        for track in playlist.tracks:
+            track_title = f"{track.name}"
+            if track.album_name:
+                track_title += f" \u00b7 {track.album_name}"
+
+            existing = await db.execute(
+                select(WishlistItem).where(
+                    and_(
+                        func.lower(WishlistItem.artist_name) == (track.artist_name or "").lower(),
+                        func.lower(WishlistItem.album_title) == track_title.lower(),
+                    )
+                )
+            )
+            if existing.scalar_one_or_none():
+                continue
+
+            item = WishlistItem(
+                item_type="track",
+                artist_name=track.artist_name or "",
+                album_title=track_title,
+                image_url=track.image_url,
+                status="wanted",
+                priority=priority,
+                source="automation",
+                auto_download=auto_download,
+                notes=f"From playlist: {playlist.title}",
+            )
+            db.add(item)
+            added += 1
+
+        await db.flush()
+        return {
+            "success": True,
+            "message": (
+                f"Imported {added} new items from playlist "
+                f"'{playlist.title}' ({playlist.track_count} total tracks)"
+            ),
+        }
+
+    except Exception as e:
+        return {"success": False, "message": f"Playlist import failed: {str(e)}"}
 
 
 def _normalize(value: Any) -> str:

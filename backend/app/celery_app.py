@@ -90,6 +90,11 @@ celery_app.conf.update(
             "task": "app.tasks.downloads.check_download_status",
             "schedule": crontab(minute="*/5"),
         },
+        # Check playlist URL automation rules every 6 hours
+        "check-playlist-urls": {
+            "task": "app.tasks.downloads.check_playlist_urls",
+            "schedule": crontab(minute=45, hour="*/6"),
+        },
         # Compute ML taste profiles weekly (after taste profile update)
         "compute-ml-taste-profiles": {
             "task": "app.tasks.ml_profiling.compute_ml_taste_profiles",

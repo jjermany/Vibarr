@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from typing import Optional, List
 
 from fastapi import APIRouter, Query, Depends, HTTPException
@@ -891,3 +892,183 @@ async def search_tracks(
 
     tracks = _deduplicate_results(tracks)[:limit]
     return {"query": q, "tracks": [t.model_dump() for t in tracks]}
+
+
+# ---------------------------------------------------------------------------
+# Playlist URL resolution
+# ---------------------------------------------------------------------------
+
+DEEZER_PLAYLIST_PATTERN = re.compile(
+    r"(?:https?://)?(?:www\.)?deezer\.com/(?:\w+/)?playlist/(\d+)", re.IGNORECASE
+)
+YOUTUBE_PLAYLIST_PATTERN = re.compile(
+    r"(?:https?://)?(?:www\.|music\.)?youtube\.com/playlist\?list=([\w-]+)",
+    re.IGNORECASE,
+)
+
+
+class PlaylistTrackItem(BaseModel):
+    """A track within a resolved playlist."""
+
+    id: str
+    name: str
+    artist_name: Optional[str] = None
+    album_name: Optional[str] = None
+    image_url: Optional[str] = None
+    duration_ms: Optional[int] = None
+    source: str
+    external_ids: dict = Field(default_factory=dict)
+
+
+class PlaylistResolveResponse(BaseModel):
+    """Response from resolving a playlist URL."""
+
+    url: str
+    source: str  # deezer, youtube
+    playlist_id: str
+    title: str
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    creator: Optional[str] = None
+    track_count: int
+    tracks: List[PlaylistTrackItem] = Field(default_factory=list)
+
+
+def _parse_ytmusic_duration(duration_str: Optional[str]) -> Optional[int]:
+    """Parse a duration string like '3:45' or '1:02:30' into milliseconds."""
+    if not duration_str:
+        return None
+    parts = duration_str.split(":")
+    try:
+        if len(parts) == 2:
+            return (int(parts[0]) * 60 + int(parts[1])) * 1000
+        elif len(parts) == 3:
+            return (int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])) * 1000
+    except ValueError:
+        return None
+    return None
+
+
+async def _resolve_deezer_playlist(
+    url: str, playlist_id: str
+) -> PlaylistResolveResponse:
+    """Resolve a Deezer playlist URL into its metadata and tracks."""
+    playlist = await deezer_service.get_playlist(playlist_id)
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found on Deezer")
+
+    tracks_data = playlist.get("tracks", {}).get("data", [])
+    tracks = [
+        PlaylistTrackItem(
+            id=f"deezer:{t['id']}",
+            name=t.get("title", ""),
+            artist_name=t.get("artist", {}).get("name"),
+            album_name=t.get("album", {}).get("title"),
+            image_url=_deezer_image_from_payload(t.get("album", {}), "album")
+            or _deezer_image_from_payload(t.get("artist", {}), "artist"),
+            duration_ms=(t.get("duration") or 0) * 1000,
+            source="deezer",
+            external_ids={"deezer_id": str(t["id"])},
+        )
+        for t in tracks_data
+    ]
+
+    return PlaylistResolveResponse(
+        url=url,
+        source="deezer",
+        playlist_id=playlist_id,
+        title=playlist.get("title", "Unknown Playlist"),
+        description=playlist.get("description"),
+        image_url=(
+            playlist.get("picture_xl")
+            or playlist.get("picture_big")
+            or playlist.get("picture_medium")
+        ),
+        creator=playlist.get("creator", {}).get("name"),
+        track_count=playlist.get("nb_tracks", len(tracks)),
+        tracks=tracks,
+    )
+
+
+async def _resolve_youtube_playlist(
+    url: str, playlist_id: str
+) -> PlaylistResolveResponse:
+    """Resolve a YouTube Music playlist URL into its metadata and tracks."""
+    if not ytmusic_service.is_available:
+        raise HTTPException(
+            status_code=503, detail="YouTube Music service unavailable"
+        )
+
+    playlist = await ytmusic_service.get_playlist(playlist_id)
+    if not playlist:
+        raise HTTPException(
+            status_code=404, detail="Playlist not found on YouTube Music"
+        )
+
+    tracks_data = playlist.get("tracks", [])
+    tracks = [
+        PlaylistTrackItem(
+            id=f"ytmusic:{t.get('videoId', '')}",
+            name=t.get("title", ""),
+            artist_name=(
+                (t.get("artists") or [{}])[0].get("name")
+                if t.get("artists")
+                else None
+            ),
+            album_name=(
+                t.get("album", {}).get("name")
+                if isinstance(t.get("album"), dict)
+                else None
+            ),
+            image_url=(
+                (t.get("thumbnails") or [{}])[-1].get("url")
+                if t.get("thumbnails")
+                else None
+            ),
+            duration_ms=_parse_ytmusic_duration(t.get("duration")),
+            source="ytmusic",
+            external_ids={"ytmusic_video_id": t.get("videoId", "")},
+        )
+        for t in tracks_data
+        if t.get("videoId")
+    ]
+
+    return PlaylistResolveResponse(
+        url=url,
+        source="youtube",
+        playlist_id=playlist_id,
+        title=playlist.get("title", "Unknown Playlist"),
+        description=playlist.get("description"),
+        image_url=(
+            (playlist.get("thumbnails") or [{}])[-1].get("url")
+            if playlist.get("thumbnails")
+            else None
+        ),
+        creator=playlist.get("author"),
+        track_count=len(tracks),
+        tracks=tracks,
+    )
+
+
+@router.post("/resolve-playlist", response_model=PlaylistResolveResponse)
+async def resolve_playlist_url(
+    url: str = Query(..., description="Deezer or YouTube playlist URL"),
+):
+    """Resolve a playlist URL into its metadata and track listing.
+
+    Supports:
+    - Deezer: ``https://www.deezer.com/playlist/{id}``
+    - YouTube / YouTube Music: ``https://[music.]youtube.com/playlist?list={id}``
+    """
+    deezer_match = DEEZER_PLAYLIST_PATTERN.search(url)
+    if deezer_match:
+        return await _resolve_deezer_playlist(url, deezer_match.group(1))
+
+    youtube_match = YOUTUBE_PLAYLIST_PATTERN.search(url)
+    if youtube_match:
+        return await _resolve_youtube_playlist(url, youtube_match.group(1))
+
+    raise HTTPException(
+        status_code=400,
+        detail="Unsupported URL. Paste a Deezer or YouTube Music playlist link.",
+    )

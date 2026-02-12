@@ -610,3 +610,72 @@ async def _import_completed_download_async(download_id: int):
             download.status_message = f"Import failed: {str(e)}"
             await db.commit()
             return {"status": "error", "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Playlist URL automation task
+# ---------------------------------------------------------------------------
+
+@celery_app.task(name="app.tasks.downloads.check_playlist_urls")
+def check_playlist_urls():
+    """Check all automation rules with playlist_url_check trigger."""
+    return _run_async(_check_playlist_urls_async())
+
+
+async def _check_playlist_urls_async():
+    """Process all enabled automation rules with the playlist_url_check trigger."""
+    from sqlalchemy import select
+    from app.models.automation_rule import AutomationRule, AutomationLog
+    from app.services.automation_engine import (
+        evaluate_all_conditions,
+        execute_rule_actions,
+    )
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(AutomationRule).where(
+                AutomationRule.trigger == "playlist_url_check",
+                AutomationRule.is_enabled == True,
+            )
+        )
+        rules = result.scalars().all()
+
+        if not rules:
+            return {"status": "no_rules", "processed": 0}
+
+        processed = 0
+        for rule in rules:
+            try:
+                context = {"trigger": "playlist_url_check"}
+                conditions_met = evaluate_all_conditions(
+                    rule.conditions or [], context
+                )
+                if not conditions_met:
+                    continue
+
+                action_results = await execute_rule_actions(
+                    rule.actions or [], context, db
+                )
+
+                rule.last_triggered_at = datetime.utcnow()
+                rule.trigger_count = (rule.trigger_count or 0) + 1
+
+                log = AutomationLog(
+                    rule_id=rule.id,
+                    trigger_type="playlist_url_check",
+                    success=all(
+                        r.get("success") for r in action_results
+                    ),
+                    actions_executed=action_results,
+                )
+                db.add(log)
+                processed += 1
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing playlist rule {rule.id}: {e}"
+                )
+                rule.last_error = str(e)
+
+        await db.commit()
+        return {"status": "completed", "processed": processed}

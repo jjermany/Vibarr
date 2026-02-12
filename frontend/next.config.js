@@ -61,6 +61,16 @@ const nextConfig = {
       },
 
       {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'i.ytimg.com',
+        pathname: '/**',
+      },
+      {
         protocol: 'http',
         hostname: 'i.scdn.co',
         pathname: '/image/**',

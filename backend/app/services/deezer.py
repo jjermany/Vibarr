@@ -99,4 +99,13 @@ class DeezerService:
             return []
 
 
+    async def get_playlist(self, playlist_id: int | str) -> Optional[Dict[str, Any]]:
+        """Get Deezer playlist metadata including embedded tracks."""
+        try:
+            return await self._get(f"/playlist/{playlist_id}")
+        except Exception as exc:
+            logger.error(f"Deezer get playlist failed: {exc}")
+            return None
+
+
 deezer_service = DeezerService()

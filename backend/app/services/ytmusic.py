@@ -63,4 +63,17 @@ class YTMusicService:
             return None
 
 
+    async def get_playlist(
+        self, playlist_id: str, limit: int = 100
+    ) -> Optional[Dict[str, Any]]:
+        """Get YouTube Music playlist metadata and tracks."""
+        if not self.client:
+            return None
+        try:
+            return self.client.get_playlist(playlistId=playlist_id, limit=limit)
+        except Exception as exc:
+            logger.error(f"YTMusic get_playlist failed: {exc}")
+            return None
+
+
 ytmusic_service = YTMusicService()

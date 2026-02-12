@@ -10,6 +10,10 @@ import {
   Trash2,
   MoreVertical,
   Loader2,
+  Disc,
+  Music,
+  User,
+  ListMusic,
 } from 'lucide-react'
 import { wishlistApi, type WishlistItem } from '@/lib/api'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -198,6 +202,24 @@ export default function WishlistPage() {
   )
 }
 
+const ITEM_TYPE_CONFIG: Record<string, { label: string; icon: React.ComponentType<any>; className: string }> = {
+  artist: { label: 'Artist', icon: User, className: 'bg-purple-500/20 text-purple-400' },
+  album: { label: 'Album', icon: Disc, className: 'bg-blue-500/20 text-blue-400' },
+  track: { label: 'Track', icon: Music, className: 'bg-green-500/20 text-green-400' },
+  playlist: { label: 'Playlist', icon: ListMusic, className: 'bg-orange-500/20 text-orange-400' },
+}
+
+function ItemTypeBadge({ type }: { type: string }) {
+  const config = ITEM_TYPE_CONFIG[type] || ITEM_TYPE_CONFIG.album
+  const Icon = config.icon
+  return (
+    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide flex-shrink-0', config.className)}>
+      <Icon className="w-3 h-3" />
+      {config.label}
+    </span>
+  )
+}
+
 function WishlistItemRow({
   item,
   onSearch,
@@ -231,6 +253,7 @@ function WishlistItemRow({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
+            <ItemTypeBadge type={item.item_type} />
             <span className="font-medium text-white truncate">
               {item.album_title || item.artist_name}
             </span>
