@@ -26,6 +26,29 @@ def _run_async(coro):
         loop.close()
 
 
+async def _sync_wishlist_status(db, download: Download, target_status: WishlistStatus, message: str = None):
+    """Sync wishlist status for a download and commit in one place."""
+    if not download.wishlist_id:
+        return None
+
+    from sqlalchemy import select
+
+    wishlist_result = await db.execute(
+        select(WishlistItem).where(WishlistItem.id == download.wishlist_id)
+    )
+    wishlist_item = wishlist_result.scalar_one_or_none()
+
+    if not wishlist_item:
+        return None
+
+    wishlist_item.status = target_status
+    if message:
+        wishlist_item.notes = message
+
+    await db.commit()
+    return wishlist_item
+
+
 @celery_app.task(name="app.tasks.downloads.process_wishlist")
 def process_wishlist(search_all=False):
     """Process wishlist items and search for downloads."""
@@ -383,17 +406,11 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
                 download.started_at = datetime.utcnow()
                 await db.commit()
 
-                # Update associated wishlist item
-                if download.wishlist_id:
-                    wishlist_result = await db.execute(
-                        select(WishlistItem).where(
-                            WishlistItem.id == download.wishlist_id
-                        )
-                    )
-                    wishlist_item = wishlist_result.scalar_one_or_none()
-                    if wishlist_item:
-                        wishlist_item.status = WishlistStatus.DOWNLOADING
-                        await db.commit()
+                await _sync_wishlist_status(
+                    db,
+                    download,
+                    WishlistStatus.DOWNLOADING,
+                )
 
                 return {
                     "status": "grabbed",
@@ -404,6 +421,12 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
                 download.status = DownloadStatus.FAILED
                 download.status_message = "Failed to grab release from Prowlarr"
                 await db.commit()
+                await _sync_wishlist_status(
+                    db,
+                    download,
+                    WishlistStatus.FAILED,
+                    message=download.status_message,
+                )
                 return {"status": "error", "message": "Failed to grab release"}
 
         except Exception as e:
@@ -411,6 +434,12 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
             download.status = DownloadStatus.FAILED
             download.status_message = str(e)
             await db.commit()
+            await _sync_wishlist_status(
+                db,
+                download,
+                WishlistStatus.FAILED,
+                message=download.status_message,
+            )
             return {"status": "error", "message": str(e)}
 
 
@@ -494,24 +523,22 @@ async def _check_download_status_async():
                     if completed_dir and final_path:
                         download.download_path = final_path
 
-                    # Update wishlist item
-                    if download.wishlist_id:
-                        wishlist_result = await db.execute(
-                            select(WishlistItem).where(
-                                WishlistItem.id == download.wishlist_id
-                            )
-                        )
-                        wishlist_item = wishlist_result.scalar_one_or_none()
-                        if wishlist_item:
-                            wishlist_item.status = WishlistStatus.DOWNLOADED
-                            await db.commit()
-
                     # Auto-import with beets if enabled (Arr-style)
                     if cfg.get_bool("beets_enabled") and cfg.get_bool("beets_auto_import", True):
                         import_completed_download.delay(download_id=download.id)
                         download.status = DownloadStatus.IMPORTING
+                        await _sync_wishlist_status(
+                            db,
+                            download,
+                            WishlistStatus.IMPORTING,
+                        )
                     else:
                         download.status = DownloadStatus.COMPLETED
+                        await _sync_wishlist_status(
+                            db,
+                            download,
+                            WishlistStatus.DOWNLOADED,
+                        )
 
                     # Optionally remove the torrent from qBittorrent after
                     # import (like the Arrs do after a successful grab).
@@ -524,6 +551,12 @@ async def _check_download_status_async():
                     download.status = DownloadStatus.FAILED
                     download.status_message = f"Download client error: {torrent.state}"
                     download.completed_at = datetime.utcnow()
+                    await _sync_wishlist_status(
+                        db,
+                        download,
+                        WishlistStatus.FAILED,
+                        message=download.status_message,
+                    )
 
                 await db.commit()
 
@@ -576,6 +609,12 @@ async def _import_completed_download_async(download_id: int):
                 download.status = DownloadStatus.FAILED
                 download.status_message = "No download path available for import"
                 await db.commit()
+                await _sync_wishlist_status(
+                    db,
+                    download,
+                    WishlistStatus.FAILED,
+                    message=download.status_message,
+                )
                 return {"status": "error", "message": "No download path"}
 
         try:
@@ -600,15 +639,26 @@ async def _import_completed_download_async(download_id: int):
                         f"Imported {import_result.albums_imported} album(s), "
                         f"{import_result.tracks_imported} track(s)"
                     )
+                    await db.commit()
+                    await _sync_wishlist_status(
+                        db,
+                        download,
+                        WishlistStatus.DOWNLOADED,
+                    )
                 else:
-                    # Beets import failed but download is complete
-                    download.status = DownloadStatus.COMPLETED
-                    download.completed_at = datetime.utcnow()
+                    download.status = DownloadStatus.FAILED
                     download.beets_imported = False
                     download.status_message = f"Beets import failed: {import_result.error}"
                     logger.error(
                         f"Beets import failed for download {download_id}: "
                         f"{import_result.error}"
+                    )
+                    await db.commit()
+                    await _sync_wishlist_status(
+                        db,
+                        download,
+                        WishlistStatus.FAILED,
+                        message=download.status_message,
                     )
             else:
                 # Beets not available, just mark as completed
@@ -616,7 +666,12 @@ async def _import_completed_download_async(download_id: int):
                 download.completed_at = datetime.utcnow()
                 download.beets_imported = False
                 download.status_message = "Download complete (beets not available)"
-
+                await db.commit()
+                await _sync_wishlist_status(
+                    db,
+                    download,
+                    WishlistStatus.DOWNLOADED,
+                )
             await db.commit()
 
             # Remove from SABnzbd history after successful import
@@ -637,18 +692,6 @@ async def _import_completed_download_async(download_id: int):
                         f"Failed to remove NZB from SABnzbd history: {e}"
                     )
 
-            # Update wishlist item
-            if download.wishlist_id:
-                wishlist_result = await db.execute(
-                    select(WishlistItem).where(
-                        WishlistItem.id == download.wishlist_id
-                    )
-                )
-                wishlist_item = wishlist_result.scalar_one_or_none()
-                if wishlist_item:
-                    wishlist_item.status = WishlistStatus.DOWNLOADED
-                    await db.commit()
-
             return {
                 "status": "completed",
                 "download_id": download_id,
@@ -661,6 +704,12 @@ async def _import_completed_download_async(download_id: int):
             download.status = DownloadStatus.FAILED
             download.status_message = f"Import failed: {str(e)}"
             await db.commit()
+            await _sync_wishlist_status(
+                db,
+                download,
+                WishlistStatus.FAILED,
+                message=download.status_message,
+            )
             return {"status": "error", "message": str(e)}
 
 
