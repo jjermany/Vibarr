@@ -19,10 +19,11 @@ export default function GenreExplorePage() {
   const params = useParams()
   const genre = decodeURIComponent(params.genre as string)
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
+  const [broadenLanguage, setBroadenLanguage] = useState(false)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['discovery', 'genre', genre],
-    queryFn: () => discoveryApi.getGenre(genre),
+    queryKey: ['discovery', 'genre', genre, broadenLanguage],
+    queryFn: () => discoveryApi.getGenre(genre, undefined, broadenLanguage),
     enabled: !!genre,
   })
 
@@ -79,6 +80,24 @@ export default function GenreExplorePage() {
           Discover {genre} artists and albums
         </p>
       </div>
+
+
+      {result?.language_filter && (
+        <div className="card p-4">
+          <p className="text-sm text-surface-300">{result.language_filter.note}</p>
+          <div className="mt-2 flex items-center gap-3">
+            <button
+              onClick={() => setBroadenLanguage((prev) => !prev)}
+              className="px-3 py-1.5 text-sm rounded bg-surface-700 hover:bg-surface-600 text-white"
+            >
+              {broadenLanguage ? 'Use preferred language filtering' : 'Broaden language'}
+            </button>
+            <span className="text-xs text-surface-400">
+              Filtered: {result.language_filter.filtered_count} · No metadata fallback: {result.language_filter.fallback_without_metadata}
+            </span>
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">

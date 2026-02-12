@@ -1,11 +1,11 @@
 """Authentication router for user registration, login, and profile management."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,9 +48,23 @@ class ProfileUpdateRequest(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
+    preferred_language: Optional[str] = None
+    secondary_languages: Optional[List[str]] = None
     profile_public: Optional[bool] = None
     share_listening_activity: Optional[bool] = None
     share_library: Optional[bool] = None
+
+    @field_validator("secondary_languages")
+    @classmethod
+    def normalize_secondary_languages(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return None
+        cleaned: List[str] = []
+        for language in value:
+            normalized = (language or "").strip().lower()
+            if normalized and normalized not in cleaned:
+                cleaned.append(normalized)
+        return cleaned
 
 
 class UserResponse(BaseModel):
@@ -60,6 +74,8 @@ class UserResponse(BaseModel):
     display_name: Optional[str]
     avatar_url: Optional[str]
     bio: Optional[str]
+    preferred_language: Optional[str]
+    secondary_languages: Optional[List[str]]
     is_admin: bool
     profile_public: bool
     share_listening_activity: bool
@@ -93,6 +109,8 @@ def _user_to_dict(user: User) -> dict:
         "display_name": user.display_name or user.username,
         "avatar_url": user.avatar_url,
         "bio": user.bio,
+        "preferred_language": user.preferred_language,
+        "secondary_languages": user.secondary_languages or [],
         "is_admin": user.is_admin,
         "profile_public": user.profile_public,
         "share_listening_activity": user.share_listening_activity,
@@ -361,6 +379,19 @@ async def update_profile(
 ):
     """Update current user profile."""
     update_data = request.model_dump(exclude_unset=True)
+
+    if "preferred_language" in update_data:
+        update_data["preferred_language"] = (
+            (update_data["preferred_language"] or "").strip().lower() or None
+        )
+
+    if "secondary_languages" in update_data:
+        secondary = [
+            language
+            for language in (update_data.get("secondary_languages") or [])
+            if language != update_data.get("preferred_language")
+        ]
+        update_data["secondary_languages"] = secondary
 
     for field, value in update_data.items():
         setattr(current_user, field, value)

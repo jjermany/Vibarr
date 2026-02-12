@@ -17,6 +17,8 @@ from app.models.recommendation import Recommendation
 from app.models.listening_history import ListeningHistory
 from app.services.lastfm import lastfm_service
 from app.services.deezer import deezer_service
+from app.services.auth import get_current_user
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,66 @@ def _tokenize(text: str) -> List[str]:
 def _contains_any_token(text: str, tokens: List[str]) -> bool:
     haystack = (text or '').lower()
     return any(token in haystack for token in tokens if len(token) > 2)
+
+
+
+
+def _normalized_language(value: Optional[str]) -> Optional[str]:
+    normalized = (value or "").strip().lower()
+    return normalized or None
+
+
+def _get_user_languages(current_user: Optional[User]) -> List[str]:
+    if not current_user:
+        return []
+    langs: List[str] = []
+    for candidate in [current_user.preferred_language, *(current_user.secondary_languages or [])]:
+        normalized = _normalized_language(candidate)
+        if normalized and normalized not in langs:
+            langs.append(normalized)
+    return langs
+
+
+def _extract_language_metadata(track: Dict[str, Any]) -> Optional[str]:
+    for source in [track, track.get("album") or {}, track.get("artist") or {}]:
+        for key in ("language", "lang", "lyrics_language", "spoken_language"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip().lower()
+    return None
+
+
+def _language_match(language_metadata: str, preferred_languages: List[str]) -> bool:
+    for preferred in preferred_languages:
+        if language_metadata == preferred or language_metadata.startswith(f"{preferred}-"):
+            return True
+    return False
+
+
+def _build_language_filter_summary(
+    preferred_languages: List[str],
+    broaden_language: bool,
+    filtered_count: int,
+    no_metadata_count: int,
+) -> Dict[str, Any]:
+    enabled = bool(preferred_languages) and not broaden_language
+    if not preferred_languages:
+        note = "Language filtering is off because no preferred profile language is set."
+    elif broaden_language:
+        note = "Language filtering is broadened; all matches are shown regardless of metadata language."
+    else:
+        note = (
+            "Language filtering is applied when provider metadata includes language. "
+            "Items without language metadata are kept as a conservative fallback."
+        )
+    return {
+        "enabled": enabled,
+        "broadened": broaden_language,
+        "preferred_languages": preferred_languages,
+        "filtered_count": filtered_count,
+        "fallback_without_metadata": no_metadata_count,
+        "note": note,
+    }
 
 
 def _deezer_cover(album: Dict[str, Any]) -> Optional[str]:
@@ -429,6 +491,8 @@ async def explore_genre(
     genre: str,
     sort: str = Query("popular", description="Sort: popular, recent, random"),
     limit: int = Query(50, ge=1, le=200),
+    broaden_language: bool = Query(False, description="Disable language filtering to broaden discovery"),
+    current_user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Explore a specific genre with local + Deezer results."""
@@ -486,7 +550,10 @@ async def explore_genre(
     deezer_tracks = await deezer_service.search_tracks(
         f'genre:"{genre}"', limit=max(40, min(limit * 3, 150))
     )
+    preferred_languages = _get_user_languages(current_user)
     genre_tokens = _tokenize(genre)
+    language_filtered_count = 0
+    language_fallback_count = 0
     for track in deezer_tracks:
         artist = track.get("artist") or {}
         album = track.get("album") or {}
@@ -499,6 +566,14 @@ async def explore_genre(
         )
         if genre_tokens and not _contains_any_token(title_blob, genre_tokens):
             continue
+
+        metadata_language = _extract_language_metadata(track)
+        if metadata_language:
+            if preferred_languages and not broaden_language and not _language_match(metadata_language, preferred_languages):
+                language_filtered_count += 1
+                continue
+        else:
+            language_fallback_count += 1
 
         if artist.get("id") and not any(
             str(a.get("id")) == f"deezer:{artist['id']}" for a in artists
@@ -551,6 +626,12 @@ async def explore_genre(
         "artists": artists[:limit],
         "albums": albums[:limit],
         "related_genres": related_genres,
+        "language_filter": _build_language_filter_summary(
+            preferred_languages=preferred_languages,
+            broaden_language=broaden_language,
+            filtered_count=language_filtered_count,
+            no_metadata_count=language_fallback_count,
+        ),
     }
 
 
@@ -670,6 +751,8 @@ async def explore_decade(
 async def explore_mood(
     mood: str,
     limit: int = Query(50, ge=1, le=200),
+    broaden_language: bool = Query(False, description="Disable language filtering to broaden discovery"),
+    current_user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Explore music by mood using local audio features + Deezer enrichment."""
@@ -760,13 +843,24 @@ async def explore_mood(
     deezer_tracks = await deezer_service.search_tracks(
         mood_queries.get(mood, mood), limit=max(40, min(limit * 3, 150))
     )
+    preferred_languages = _get_user_languages(current_user)
     mood_tokens = _tokenize(mood_queries.get(mood, mood))
+    language_filtered_count = 0
+    language_fallback_count = 0
     for track in deezer_tracks:
         artist = track.get("artist") or {}
         album = track.get("album") or {}
         title_blob = " ".join([track.get("title", ""), artist.get("name", ""), album.get("title", "")])
         if mood_tokens and not _contains_any_token(title_blob, mood_tokens):
             continue
+
+        metadata_language = _extract_language_metadata(track)
+        if metadata_language:
+            if preferred_languages and not broaden_language and not _language_match(metadata_language, preferred_languages):
+                language_filtered_count += 1
+                continue
+        else:
+            language_fallback_count += 1
 
         tracks.append(
             {
@@ -802,6 +896,12 @@ async def explore_mood(
         "audio_profile": profile,
         "tracks": tracks[:limit],
         "albums": albums[:20],
+        "language_filter": _build_language_filter_summary(
+            preferred_languages=preferred_languages,
+            broaden_language=broaden_language,
+            filtered_count=language_filtered_count,
+            no_metadata_count=language_fallback_count,
+        ),
     }
 
 

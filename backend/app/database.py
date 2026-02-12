@@ -72,6 +72,16 @@ async def _apply_schema_migrations(conn) -> None:
             "image_url",
             "ALTER TABLE wishlist ADD COLUMN image_url VARCHAR(1000)",
         ),
+        (
+            "users",
+            "preferred_language",
+            "ALTER TABLE users ADD COLUMN preferred_language VARCHAR(32)",
+        ),
+        (
+            "users",
+            "secondary_languages",
+            "ALTER TABLE users ADD COLUMN secondary_languages JSON",
+        ),
     ]
     for table, column, ddl in migrations:
         result = await conn.execute(

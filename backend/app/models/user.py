@@ -27,6 +27,8 @@ class User(Base):
     display_name: Mapped[Optional[str]] = mapped_column(String(100))
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500))
     bio: Mapped[Optional[str]] = mapped_column(String(500))
+    preferred_language: Mapped[Optional[str]] = mapped_column(String(32))
+    secondary_languages: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
 
     # Plex integration (per-user)
     plex_token: Mapped[Optional[str]] = mapped_column(String(255))
