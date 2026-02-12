@@ -236,12 +236,20 @@ async def search_all_wishlist(
             detail="Search is unavailable until Prowlarr is configured and reachable",
         )
 
-    # Count items to search
+    # Collect items to search and transition to searching before queuing work
+    now = datetime.utcnow()
     result = await db.execute(
         select(WishlistItem)
         .where(WishlistItem.status == WishlistStatus.WANTED)
     )
     items = result.scalars().all()
+
+    for item in items:
+        item.status = WishlistStatus.SEARCHING
+        item.last_searched_at = now
+        item.search_count = (item.search_count or 0) + 1
+
+    await db.commit()
 
     process_wishlist.delay(search_all=True)
 
@@ -265,6 +273,11 @@ async def search_wishlist_item(
             status_code=503,
             detail="Search is unavailable until Prowlarr is configured and reachable",
         )
+
+    item.status = WishlistStatus.SEARCHING
+    item.last_searched_at = datetime.utcnow()
+    item.search_count = (item.search_count or 0) + 1
+    await db.commit()
 
     # Queue Celery task to search Prowlarr
     from app.tasks.downloads import search_wishlist_item as search_task
