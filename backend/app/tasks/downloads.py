@@ -635,13 +635,13 @@ async def _check_download_status_async():
     """
     logger.info("Checking download statuses")
 
+    await cfg.ensure_cache()
+
     qbit_configured = download_client_service.is_configured
     sab_configured = sabnzbd_service.is_configured and cfg.get_bool("sabnzbd_enabled")
 
     if not qbit_configured and not sab_configured:
         return {"status": "skipped", "reason": "No download client configured"}
-
-    await cfg.ensure_cache()
 
     completed_dir = (
         cfg.get_setting("qbittorrent_completed_path")
