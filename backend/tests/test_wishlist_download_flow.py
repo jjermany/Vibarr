@@ -1,6 +1,7 @@
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.sql.dml import Update
 
 from app.database import get_db
 from app.models.download import Download, DownloadStatus
@@ -32,6 +33,9 @@ class _FakeRouterDb:
     async def commit(self):
         self.commit_count += 1
 
+    async def delete(self, _model):
+        return None
+
 
 
 
@@ -53,6 +57,29 @@ class _FakeRouterDbMany:
 
     async def execute(self, _query):
         return _ScalarsListResult(self.items)
+
+    async def commit(self):
+        self.commit_count += 1
+
+
+class _FakeRouterDeleteDb:
+    def __init__(self, item, downloads):
+        self.item = item
+        self.downloads = downloads
+        self.deleted = []
+        self.commit_count = 0
+
+    async def execute(self, query):
+        if isinstance(query, Update):
+            for download in self.downloads:
+                if download.wishlist_id == self.item.id:
+                    download.wishlist_id = None
+            return None
+        return _ScalarResult(self.item)
+
+    async def delete(self, model):
+        self.deleted.append(model)
+        self.item = None
 
     async def commit(self):
         self.commit_count += 1
@@ -381,3 +408,63 @@ async def test_post_search_all_marks_wanted_items_searching_before_queue(monkeyp
     assert all(item.status == WishlistStatus.SEARCHING for item in items)
     assert all(item.last_searched_at is not None for item in items)
     assert [item.search_count for item in items] == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_delete_wishlist_item_wanted_status_returns_stable_payload():
+    item = WishlistItem(id=77, item_type="album", status=WishlistStatus.WANTED)
+    fake_db = _FakeRouterDeleteDb(item=item, downloads=[])
+
+    async def override_get_db():
+        yield fake_db
+
+    app = FastAPI()
+    app.include_router(wishlist_router.router, prefix="/api/wishlist")
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.delete("/api/wishlist/77")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "deleted", "id": 77}
+    assert fake_db.commit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_found_wishlist_item_detaches_related_downloads():
+    item = WishlistItem(id=88, item_type="album", status=WishlistStatus.FOUND)
+    linked_download = Download(
+        id=501,
+        wishlist_id=88,
+        artist_name="Artist",
+        album_title="Album",
+        status=DownloadStatus.FOUND,
+    )
+    unlinked_download = Download(
+        id=502,
+        wishlist_id=999,
+        artist_name="Other",
+        album_title="Other Album",
+        status=DownloadStatus.FOUND,
+    )
+    fake_db = _FakeRouterDeleteDb(item=item, downloads=[linked_download, unlinked_download])
+
+    async def override_get_db():
+        yield fake_db
+
+    app = FastAPI()
+    app.include_router(wishlist_router.router, prefix="/api/wishlist")
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.delete("/api/wishlist/88")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "deleted", "id": 88}
+    assert linked_download.wishlist_id is None
+    assert unlinked_download.wishlist_id == 999
+    assert fake_db.commit_count == 1
