@@ -38,6 +38,7 @@ DEFAULT_APP_SETTINGS = [
     # Prowlarr
     {"key": "prowlarr_url", "value": "", "category": "prowlarr"},
     {"key": "prowlarr_api_key", "value": "", "category": "prowlarr"},
+    {"key": "prowlarr_min_title_match_score", "value": "0.6", "category": "prowlarr"},
     # MusicBrainz
     {"key": "musicbrainz_user_agent", "value": "Vibarr/1.0 (https://github.com/jjermany/Vibarr)", "category": "musicbrainz"},
     # TheAudioDB
