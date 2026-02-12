@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { Play, Plus, Check } from 'lucide-react'
+import { Plus, Check } from 'lucide-react'
 import { useState } from 'react'
 import { cn, getInitials } from '@/lib/utils'
 
@@ -68,19 +68,17 @@ export function ArtistCard({ artist, size = 'md', onClick, onAdd }: ArtistCardPr
         )}
 
         {/* Hover overlay */}
-        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-          <button className="p-3 bg-primary-500 rounded-full hover:bg-primary-600 transition-colors">
-            <Play className="w-5 h-5 text-white" fill="white" />
-          </button>
+        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
           {onAdd && (
             <button
               onClick={handleAdd}
-              className="p-2 bg-surface-700 rounded-full hover:bg-surface-600 transition-colors"
+              className="p-3 bg-surface-700 rounded-full hover:bg-surface-600 transition-colors"
+              aria-label={inLibrary ? 'In library' : 'Add to library'}
             >
               {inLibrary ? (
-                <Check className="w-4 h-4 text-green-400" />
+                <Check className="w-5 h-5 text-green-400" />
               ) : (
-                <Plus className="w-4 h-4 text-white" />
+                <Plus className="w-5 h-5 text-white" />
               )}
             </button>
           )}
