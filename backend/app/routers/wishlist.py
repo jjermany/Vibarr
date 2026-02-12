@@ -287,6 +287,10 @@ def _wishlist_item_to_dict(item: WishlistItem) -> dict:
         "source": item.source,
         "confidence_score": item.confidence_score,
         "image_url": item.image_url,
+        "status_message": item.notes,
+        "last_searched_at": item.last_searched_at,
+        "search_count": item.search_count,
+        "updated_at": item.updated_at,
         "auto_download": item.auto_download,
         "created_at": item.created_at,
     }

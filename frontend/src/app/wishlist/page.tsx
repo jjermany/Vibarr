@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Heart,
@@ -24,19 +24,33 @@ import toast from 'react-hot-toast'
 
 type FilterStatus = 'all' | 'wanted' | 'searching' | 'found' | 'downloading' | 'downloaded' | 'failed'
 
+const ACTIVE_STATUSES = ['searching', 'downloading', 'importing', 'queued']
+
+const CTA_BY_STATUS: Partial<Record<string, { filter: FilterStatus; label: string }>> = {
+  found: { filter: 'found', label: 'View in Found' },
+  downloading: { filter: 'downloading', label: 'View in Downloading' },
+  importing: { filter: 'downloading', label: 'View in Downloading' },
+}
+
 export default function WishlistPage() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const queryClient = useQueryClient()
   const previousStatuses = useRef<Record<number, string>>({})
+  const manualSearchItems = useRef<Record<number, string>>({})
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['wishlist', filterStatus],
+  const { data: filteredData, isLoading } = useQuery({
+    queryKey: ['wishlist', 'filtered', filterStatus],
     queryFn: () =>
       wishlistApi.list(filterStatus !== 'all' ? { status: filterStatus } : undefined),
+  })
+
+  const { data: statusFeedData } = useQuery({
+    queryKey: ['wishlist', 'status-feed'],
+    queryFn: () => wishlistApi.list(),
     refetchInterval: (query) => {
       const items = (query.state.data as any)?.data || []
-      const active = items.some((item: WishlistItem) => ['searching', 'downloading', 'importing', 'queued'].includes(item.status))
-      return active ? 3000 : false
+      const hasActiveItems = items.some((item: WishlistItem) => ACTIVE_STATUSES.includes(item.status))
+      return hasActiveItems ? 3000 : false
     },
   })
 
@@ -70,23 +84,25 @@ export default function WishlistPage() {
     }
   })
 
-  const items = data?.data || []
+  const items = filteredData?.data || []
+  const statusFeedItems = statusFeedData?.data || []
 
+  const activeSearchCount = statusFeedItems.filter((item: WishlistItem) => item.status === 'searching').length
 
-  const activeSearchCount = items.filter((item: WishlistItem) => item.status === 'searching').length
-
-  const statusCounts = items.reduce(
+  const statusCounts = useMemo(() => statusFeedItems.reduce(
     (acc: Record<string, number>, item: WishlistItem) => {
       acc[item.status] = (acc[item.status] || 0) + 1
       return acc
     },
     {}
-  )
+  ), [statusFeedItems])
 
   useEffect(() => {
     const previous = previousStatuses.current
-    for (const item of items) {
+
+    for (const item of statusFeedItems) {
       const priorStatus = previous[item.id]
+
       if (priorStatus === 'searching' && item.status !== 'searching') {
         const itemLabel = item.album_title || item.artist_name || 'Wishlist item'
         if (item.status === 'found') {
@@ -97,13 +113,38 @@ export default function WishlistPage() {
           toast.error(`Search failed for ${itemLabel}`)
         }
       }
+
+      const searchedLabel = manualSearchItems.current[item.id]
+      const ctaConfig = CTA_BY_STATUS[item.status]
+      if (searchedLabel && ctaConfig && priorStatus !== item.status) {
+        toast((t) => (
+          <div className="flex items-center gap-2 text-sm">
+            <span>{searchedLabel} moved to {item.status}.</span>
+            <button
+              className="rounded bg-primary-500/20 px-2 py-1 text-primary-200 hover:bg-primary-500/30"
+              onClick={() => {
+                setFilterStatus(ctaConfig.filter)
+                toast.dismiss(t.id)
+              }}
+            >
+              {ctaConfig.label}
+            </button>
+          </div>
+        ), { duration: 8000 })
+        delete manualSearchItems.current[item.id]
+      }
+
       previous[item.id] = item.status
     }
-  }, [items])
+  }, [statusFeedItems])
+
+  const handleSearch = (item: WishlistItem) => {
+    manualSearchItems.current[item.id] = item.album_title || item.artist_name || 'Wishlist item'
+    searchMutation.mutate(item.id)
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Wishlist</h1>
@@ -123,7 +164,6 @@ export default function WishlistPage() {
         </div>
       </div>
 
-      {/* Status Filters */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2">
         {(['all', 'wanted', 'searching', 'found', 'downloading', 'downloaded', 'failed'] as const).map(
           (status) => (
@@ -148,7 +188,6 @@ export default function WishlistPage() {
         )}
       </div>
 
-
       {activeSearchCount > 0 && (
         <div className="rounded-lg border border-primary-500/30 bg-primary-500/10 px-4 py-3 text-sm text-primary-200 flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin" />
@@ -158,7 +197,6 @@ export default function WishlistPage() {
         </div>
       )}
 
-      {/* Content */}
       {isLoading ? (
         <LoadingPage message="Loading wishlist..." />
       ) : items.length > 0 ? (
@@ -167,7 +205,7 @@ export default function WishlistPage() {
             <WishlistItemRow
               key={item.id}
               item={item}
-              onSearch={() => searchMutation.mutate(item.id)}
+              onSearch={() => handleSearch(item)}
               onDelete={() => deleteMutation.mutate(item.id)}
             />
           ))}
@@ -210,6 +248,23 @@ function ItemTypeBadge({ type }: { type: string }) {
   )
 }
 
+function getLastActionText(item: WishlistItem): string | null {
+  if (item.status_message) {
+    return item.status_message
+  }
+
+  const fallbackByStatus: Partial<Record<string, string>> = {
+    searching: 'Searching indexers',
+    found: 'Match found and waiting for action',
+    downloading: 'Queued in download client',
+    importing: 'Importing into library',
+    downloaded: 'Completed and imported',
+    failed: 'Action failed; check logs',
+  }
+
+  return fallbackByStatus[item.status] || null
+}
+
 function WishlistItemRow({
   item,
   onSearch,
@@ -222,6 +277,7 @@ function WishlistItemRow({
   const [showMenu, setShowMenu] = useState(false)
   const [imageFailed, setImageFailed] = useState(false)
   const normalizedImageUrl = (item.image_url || '').replace(/^http:\/\//i, 'https://')
+  const lastActionText = getLastActionText(item)
 
   return (
     <div className="flex items-center justify-between p-4 hover:bg-surface-800/50 transition-colors">
@@ -262,6 +318,9 @@ function WishlistItemRow({
               </>
             )}
           </div>
+          {lastActionText && (
+            <p className="mt-1 text-xs text-surface-300 truncate">Last action: {lastActionText}</p>
+          )}
         </div>
       </div>
 
