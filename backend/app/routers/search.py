@@ -953,7 +953,7 @@ async def _resolve_deezer_playlist(
     url: str, playlist_id: str
 ) -> PlaylistResolveResponse:
     """Resolve a Deezer playlist URL into its metadata and tracks."""
-    playlist = await deezer_service.get_playlist(playlist_id)
+    playlist = await deezer_service.get_playlist_with_tracks(playlist_id)
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found on Deezer")
 
@@ -985,7 +985,7 @@ async def _resolve_deezer_playlist(
             or playlist.get("picture_medium")
         ),
         creator=playlist.get("creator", {}).get("name"),
-        track_count=playlist.get("nb_tracks", len(tracks)),
+        track_count=len(tracks),
         tracks=tracks,
     )
 
@@ -999,7 +999,7 @@ async def _resolve_youtube_playlist(
             status_code=503, detail="YouTube Music service unavailable"
         )
 
-    playlist = await ytmusic_service.get_playlist(playlist_id)
+    playlist = await ytmusic_service.get_playlist(playlist_id, limit=None)
     if not playlist:
         raise HTTPException(
             status_code=404, detail="Playlist not found on YouTube Music"

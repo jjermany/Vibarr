@@ -30,6 +30,13 @@ class DeezerService:
             response.raise_for_status()
             return response.json()
 
+    async def _get_by_url(self, url: str) -> Dict[str, Any]:
+        """Run a Deezer GET request against an absolute URL and return JSON data."""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+
     async def search_artists(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         """Search artists by name."""
         try:
@@ -106,6 +113,58 @@ class DeezerService:
         except Exception as exc:
             logger.error(f"Deezer get playlist failed: {exc}")
             return None
+
+    async def get_playlist_tracks(
+        self, playlist_id: int | str, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """Fetch all tracks for a playlist by following pagination."""
+        try:
+            payload = await self._get(
+                f"/playlist/{playlist_id}/tracks", {"limit": limit, "index": 0}
+            )
+            tracks = payload.get("data", []) or []
+
+            while True:
+                next_url = payload.get("next")
+                if next_url:
+                    payload = await self._get_by_url(next_url)
+                else:
+                    total = payload.get("total")
+                    if not isinstance(total, int) or len(tracks) >= total:
+                        break
+
+                    payload = await self._get(
+                        f"/playlist/{playlist_id}/tracks",
+                        {"limit": limit, "index": len(tracks)},
+                    )
+
+                next_tracks = payload.get("data", []) or []
+                if not next_tracks:
+                    break
+                tracks.extend(next_tracks)
+
+            return tracks
+        except Exception as exc:
+            logger.error(f"Deezer get playlist tracks failed: {exc}")
+            return []
+
+    async def get_playlist_with_tracks(
+        self, playlist_id: int | str, limit: int = 100
+    ) -> Optional[Dict[str, Any]]:
+        """Get playlist metadata and ensure embedded track list is fully paginated."""
+        playlist = await self.get_playlist(playlist_id)
+        if not playlist:
+            return None
+
+        tracks = await self.get_playlist_tracks(playlist_id, limit=limit)
+        tracks_payload = playlist.get("tracks") or {}
+        tracks_payload["data"] = tracks
+        tracks_payload["total"] = len(tracks)
+
+        tracks_payload.pop("next", None)
+
+        playlist["tracks"] = tracks_payload
+        return playlist
 
 
 deezer_service = DeezerService()

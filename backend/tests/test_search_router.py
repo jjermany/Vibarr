@@ -248,3 +248,89 @@ async def test_get_preview_deezer_artist_album_image_uses_md5_fallback(monkeypat
         response.top_albums[0]["image_url"]
         == "https://e-cdns-images.dzcdn.net/images/album/albummd5/1000x1000-000000-80-0-0.jpg"
     )
+
+
+@pytest.mark.asyncio
+async def test_resolve_youtube_playlist_fetches_all_tracks(monkeypatch):
+    monkeypatch.setattr(search_router.ytmusic_service, "_client", object())
+
+    async def fake_get_playlist(playlist_id: str, limit=None):
+        assert playlist_id == "PL123"
+        assert limit is None
+        return {
+            "title": "YT Playlist",
+            "author": "Tester",
+            "tracks": [
+                {
+                    "videoId": "vid-1",
+                    "title": "Track One",
+                    "duration": "3:05",
+                    "artists": [{"name": "Artist One"}],
+                },
+                {
+                    "videoId": "vid-2",
+                    "title": "Track Two",
+                    "duration": "4:00",
+                    "artists": [{"name": "Artist Two"}],
+                },
+            ],
+        }
+
+    monkeypatch.setattr(search_router.ytmusic_service, "get_playlist", fake_get_playlist)
+
+    response = await search_router._resolve_youtube_playlist(
+        "https://music.youtube.com/playlist?list=PL123", "PL123"
+    )
+
+    assert response.track_count == 2
+    assert len(response.tracks) == 2
+
+
+@pytest.mark.asyncio
+async def test_resolve_deezer_playlist_uses_full_track_list(monkeypatch):
+    async def fake_get_playlist_with_tracks(playlist_id: str):
+        assert playlist_id == "42"
+        return {
+            "title": "DZ Playlist",
+            "description": "desc",
+            "creator": {"name": "DJ"},
+            "tracks": {
+                "data": [
+                    {
+                        "id": 1,
+                        "title": "First",
+                        "duration": 100,
+                        "artist": {"name": "A"},
+                        "album": {"title": "AA"},
+                    },
+                    {
+                        "id": 2,
+                        "title": "Second",
+                        "duration": 200,
+                        "artist": {"name": "B"},
+                        "album": {"title": "BB"},
+                    },
+                    {
+                        "id": 3,
+                        "title": "Third",
+                        "duration": 300,
+                        "artist": {"name": "C"},
+                        "album": {"title": "CC"},
+                    },
+                ]
+            },
+            "nb_tracks": 1,
+        }
+
+    monkeypatch.setattr(
+        search_router.deezer_service,
+        "get_playlist_with_tracks",
+        fake_get_playlist_with_tracks,
+    )
+
+    response = await search_router._resolve_deezer_playlist(
+        "https://www.deezer.com/playlist/42", "42"
+    )
+
+    assert response.track_count == 3
+    assert len(response.tracks) == 3
