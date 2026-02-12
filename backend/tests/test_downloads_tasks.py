@@ -299,7 +299,9 @@ class _FakeProwlarrGrabService:
         self._grab_result = grab_result
 
     async def grab(self, *_args, **_kwargs):
-        return self._grab_result
+        if isinstance(self._grab_result, dict):
+            return self._grab_result
+        return {"success": bool(self._grab_result), "download_id": self._grab_result}
 
 
 @pytest.mark.asyncio
@@ -395,6 +397,37 @@ async def test_grab_or_import_failures_mark_wishlist_failed(monkeypatch):
     assert download.status == DownloadStatus.FAILED
     assert wishlist.status == WishlistStatus.FAILED
     assert "Beets import failed" in (wishlist.notes or "")
+
+
+
+
+@pytest.mark.asyncio
+async def test_grab_ack_without_client_id_marks_downloading(monkeypatch):
+    wishlist = WishlistItem(id=21, item_type="album", status=WishlistStatus.FOUND)
+    download = downloads.Download(
+        id=201,
+        artist_name="Artist",
+        album_title="Album",
+        status=DownloadStatus.FOUND,
+        wishlist_id=21,
+    )
+    session = _FakeMultiSession(download=download, wishlist=wishlist)
+
+    monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(
+        downloads,
+        "prowlarr_service",
+        _FakeProwlarrGrabService(grab_result={"success": True, "download_id": None}),
+    )
+
+    grab_result = await downloads._grab_release_async(download_id=201, guid="g", indexer_id=1)
+
+    assert grab_result["status"] == "grabbed"
+    assert grab_result["client_id"] is None
+    assert download.status == DownloadStatus.DOWNLOADING
+    assert "waiting for download client" in (download.status_message or "").lower()
+    assert wishlist.status == WishlistStatus.DOWNLOADING
 
 
 def _new_value_coro(value):

@@ -208,19 +208,18 @@ class ProwlarrService:
         self,
         guid: str,
         indexer_id: int,
-    ) -> Optional[str]:
+    ) -> Dict[str, Optional[str] | bool]:
         """
         Grab a release and send to download client.
 
-        Returns the download ID if successful.
+        Returns a success flag and optional client download ID.
         """
         if not self.client:
-            return None
+            return {"success": False, "download_id": None}
 
         try:
-            # Prowlarr v1 API handles grabs via POST /api/v1/search
-            # with a payload containing the guid and indexer ID.
-            grab_endpoint = "/api/v1/search"
+            # Prowlarr v1 API handles release grabs via POST /api/v1/release.
+            grab_endpoint = "/api/v1/release"
             response = await self.client.post(
                 grab_endpoint,
                 json={
@@ -228,11 +227,29 @@ class ProwlarrService:
                     "indexerId": indexer_id,
                 },
             )
+
+            if response.is_error:
+                logger.error(
+                    "Prowlarr grab failed with status %s and body %s",
+                    response.status_code,
+                    response.text,
+                )
             response.raise_for_status()
-            return response.json().get("id")
+
+            response_data: Dict[str, Any] = {}
+            if response.content:
+                try:
+                    response_data = response.json()
+                except ValueError:
+                    logger.warning("Prowlarr grab acknowledged with non-JSON response body")
+
+            return {
+                "success": True,
+                "download_id": response_data.get("id"),
+            }
         except Exception as e:
             logger.error(f"Prowlarr grab failed: {e}")
-            return None
+            return {"success": False, "download_id": None}
 
     async def get_download_clients(self) -> List[Dict[str, Any]]:
         """Get configured download clients."""

@@ -105,12 +105,14 @@ def test_score_result_handles_non_numeric_fields():
 
 
 @pytest.mark.asyncio
-async def test_grab_posts_expected_payload_and_returns_id(monkeypatch):
+async def test_grab_posts_expected_payload_and_returns_success_with_optional_id(monkeypatch):
     service = ProwlarrService()
 
     response = Mock()
+    response.content = b'{"id":"grab-123"}'
     response.json.return_value = {"id": "grab-123"}
     response.raise_for_status.return_value = None
+    response.is_error = False
 
     client = AsyncMock()
     client.is_closed = False
@@ -120,8 +122,28 @@ async def test_grab_posts_expected_payload_and_returns_id(monkeypatch):
 
     result = await service.grab(guid="abc-guid", indexer_id=42)
 
-    assert result == "grab-123"
+    assert result == {"success": True, "download_id": "grab-123"}
     client.post.assert_awaited_once()
     args, kwargs = client.post.await_args
-    assert args == ("/api/v1/search",)
+    assert args == ("/api/v1/release",)
     assert kwargs["json"] == {"guid": "abc-guid", "indexerId": 42}
+
+
+@pytest.mark.asyncio
+async def test_grab_accepts_success_without_client_id(monkeypatch):
+    service = ProwlarrService()
+
+    response = Mock()
+    response.content = b""
+    response.raise_for_status.return_value = None
+    response.is_error = False
+
+    client = AsyncMock()
+    client.is_closed = False
+    client.post.return_value = response
+
+    monkeypatch.setattr(service, "_client", client)
+
+    result = await service.grab(guid="abc-guid", indexer_id=42)
+
+    assert result == {"success": True, "download_id": None}
