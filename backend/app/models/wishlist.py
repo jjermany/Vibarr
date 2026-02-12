@@ -16,6 +16,7 @@ class WishlistStatus(str, enum.Enum):
     SEARCHING = "searching"
     FOUND = "found"
     DOWNLOADING = "downloading"
+    IMPORTING = "importing"
     DOWNLOADED = "downloaded"
     FAILED = "failed"
 

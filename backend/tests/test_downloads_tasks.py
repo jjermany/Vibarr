@@ -206,3 +206,191 @@ async def test_search_wishlist_item_auto_grab_enqueues_task_when_threshold_met(m
         "guid": "release-guid",
         "indexer_id": 7,
     }
+
+
+class _ScalarsResult:
+    def __init__(self, items):
+        self._items = items
+
+    def all(self):
+        return self._items
+
+
+class _ListResult:
+    def __init__(self, items):
+        self._items = items
+
+    def scalars(self):
+        return _ScalarsResult(self._items)
+
+
+class _FakeMultiSession:
+    def __init__(self, download=None, wishlist=None, active_downloads=None):
+        self.download = download
+        self.wishlist = wishlist
+        self.active_downloads = active_downloads or ([] if download is None else [download])
+
+    async def execute(self, query):
+        entity = query.column_descriptions[0].get("entity")
+        if entity is WishlistItem:
+            return _ScalarResult(self.wishlist)
+        if entity.__name__ == "Download":
+            if any("status" in str(c) for c in query._where_criteria):
+                return _ListResult(self.active_downloads)
+            return _ScalarResult(self.download)
+        return _ScalarResult(None)
+
+    def add(self, model):
+        return None
+
+    async def commit(self):
+        return None
+
+    async def refresh(self, model):
+        return None
+
+
+class _FakeTorrent:
+    def __init__(self, *, is_complete=False, is_errored=False, state="", progress=0.0, dl_speed=0, eta=0, content_path="/music/final", save_path="/music"):
+        self.is_complete = is_complete
+        self.is_errored = is_errored
+        self.state = state
+        self.progress = progress
+        self.dl_speed = dl_speed
+        self.eta = eta
+        self.content_path = content_path
+        self.save_path = save_path
+
+
+class _FakeClientForStatus:
+    def __init__(self, torrent):
+        self.is_configured = True
+        self._torrent = torrent
+
+    async def get_torrent(self, _download_id):
+        return self._torrent
+
+    async def delete_torrent(self, _download_id, delete_files=False):
+        return None
+
+
+class _ImportResult:
+    def __init__(self, success, error=None):
+        self.success = success
+        self.error = error
+        self.albums_imported = 1
+        self.tracks_imported = 10
+        self.final_path = "/library/artist/album"
+
+
+class _FakeBeetsService:
+    def __init__(self, result):
+        self.is_available = True
+        self._result = result
+
+    async def import_directory(self, **_kwargs):
+        return self._result
+
+
+class _FakeProwlarrGrabService:
+    def __init__(self, grab_result):
+        self.is_available = True
+        self._grab_result = grab_result
+
+    async def grab(self, *_args, **_kwargs):
+        return self._grab_result
+
+
+@pytest.mark.asyncio
+async def test_status_transition_downloading_to_importing_to_downloaded(monkeypatch):
+    wishlist = WishlistItem(id=10, item_type="album", status=WishlistStatus.DOWNLOADING)
+    download = downloads.Download(
+        id=100,
+        artist_name="Artist",
+        album_title="Album",
+        status=DownloadStatus.DOWNLOADING,
+        download_id="hash",
+        wishlist_id=10,
+    )
+    session = _FakeMultiSession(download=download, wishlist=wishlist)
+
+    monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(downloads, "download_client_service", _FakeClientForStatus(_FakeTorrent(is_complete=True, progress=100.0)))
+    monkeypatch.setattr(downloads.cfg, "get_setting", lambda *args, **kwargs: "/music/completed")
+
+    def fake_get_bool(key, default=False):
+        mapping = {
+            "beets_enabled": True,
+            "beets_auto_import": True,
+            "qbittorrent_remove_completed": False,
+            "sabnzbd_remove_completed": False,
+        }
+        return mapping.get(key, default)
+
+    monkeypatch.setattr(downloads.cfg, "get_bool", fake_get_bool)
+    monkeypatch.setattr(downloads.import_completed_download, "delay", lambda **kwargs: None)
+
+    payload = await downloads._check_download_status_async()
+
+    assert payload["completed"] == 1
+    assert download.status == DownloadStatus.IMPORTING
+    assert wishlist.status == WishlistStatus.IMPORTING
+
+    monkeypatch.setattr(
+        downloads,
+        "beets_service",
+        _FakeBeetsService(_ImportResult(success=True)),
+    )
+
+    result = await downloads._import_completed_download_async(download_id=100)
+
+    assert result["status"] == "completed"
+    assert download.status == DownloadStatus.COMPLETED
+    assert wishlist.status == WishlistStatus.DOWNLOADED
+
+
+@pytest.mark.asyncio
+async def test_grab_or_import_failures_mark_wishlist_failed(monkeypatch):
+    wishlist = WishlistItem(id=20, item_type="album", status=WishlistStatus.FOUND)
+    download = downloads.Download(
+        id=200,
+        artist_name="Artist",
+        album_title="Album",
+        status=DownloadStatus.FOUND,
+        wishlist_id=20,
+        download_id="hash",
+        download_path="/downloads/album",
+    )
+    session = _FakeMultiSession(download=download, wishlist=wishlist)
+
+    monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(
+        downloads,
+        "prowlarr_service",
+        _FakeProwlarrGrabService(grab_result=None),
+    )
+
+    grab_result = await downloads._grab_release_async(download_id=200, guid="g", indexer_id=1)
+
+    assert grab_result["status"] == "error"
+    assert download.status == DownloadStatus.FAILED
+    assert wishlist.status == WishlistStatus.FAILED
+    assert "Failed to grab" in (wishlist.notes or "")
+
+    wishlist.status = WishlistStatus.DOWNLOADING
+    download.status = DownloadStatus.IMPORTING
+
+    monkeypatch.setattr(
+        downloads,
+        "beets_service",
+        _FakeBeetsService(_ImportResult(success=False, error="bad tags")),
+    )
+
+    import_result = await downloads._import_completed_download_async(download_id=200)
+
+    assert import_result["status"] == "completed"
+    assert download.status == DownloadStatus.FAILED
+    assert wishlist.status == WishlistStatus.FAILED
+    assert "Beets import failed" in (wishlist.notes or "")
