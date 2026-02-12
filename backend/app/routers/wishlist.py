@@ -2,8 +2,8 @@
 
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,6 +60,29 @@ class WishlistItemUpdate(BaseModel):
     preferred_format: Optional[str] = None
     auto_download: Optional[bool] = None
     notes: Optional[str] = None
+
+
+class WishlistSearchSelectedRequest(BaseModel):
+    """Search selected wishlist items."""
+    item_ids: List[int]
+
+
+class WishlistBulkDeleteRequest(BaseModel):
+    """Bulk delete wishlist items by ids or all matching status."""
+    item_ids: Optional[List[int]] = None
+    all: bool = False
+    status: Optional[WishlistStatus] = None
+
+
+class WishlistBulkResult(BaseModel):
+    """Result payload for bulk wishlist operations."""
+    requested: int
+    deleted: int = 0
+    skipped: int = 0
+    failed: int = 0
+    deleted_ids: List[int] = Field(default_factory=list)
+    skipped_ids: List[int] = Field(default_factory=list)
+    failed_ids: List[int] = Field(default_factory=list)
 
 
 @router.get("", response_model=List[WishlistItemResponse])
@@ -145,7 +168,7 @@ async def add_to_wishlist(
     )
 
 
-@router.get("/{item_id}", response_model=WishlistItemResponse)
+@router.get("/{item_id:int}", response_model=WishlistItemResponse)
 async def get_wishlist_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
@@ -171,7 +194,7 @@ async def get_wishlist_item(
     )
 
 
-@router.patch("/{item_id}", response_model=WishlistItemResponse)
+@router.patch("/{item_id:int}", response_model=WishlistItemResponse)
 async def update_wishlist_item(
     item_id: int,
     update: WishlistItemUpdate,
@@ -206,7 +229,7 @@ async def update_wishlist_item(
     )
 
 
-@router.delete("/{item_id}")
+@router.delete("/{item_id:int}")
 async def delete_wishlist_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
@@ -218,13 +241,7 @@ async def delete_wishlist_item(
     if not item:
         raise HTTPException(status_code=404, detail="Wishlist item not found")
 
-    await db.execute(
-        update(Download)
-        .where(Download.wishlist_id == item_id)
-        .values(wishlist_id=None)
-    )
-
-    await db.delete(item)
+    await _delete_item_with_download_cleanup(db, item)
     await db.commit()
 
     return {"status": "deleted", "id": item_id}
@@ -263,7 +280,117 @@ async def search_all_wishlist(
     return {"status": "search_all_queued", "items_to_search": len(items)}
 
 
-@router.post("/{item_id}/search")
+@router.post("/search-selected")
+async def search_selected_wishlist_items(
+    payload: WishlistSearchSelectedRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Search selected wanted wishlist items."""
+    if not prowlarr_service.is_available:
+        raise HTTPException(
+            status_code=503,
+            detail="Search is unavailable until Prowlarr is configured and reachable",
+        )
+
+    unique_ids = list(dict.fromkeys(payload.item_ids))
+    if not unique_ids:
+        return {"requested": 0, "queued": 0, "skipped": 0, "failed": 0, "queued_ids": [], "skipped_ids": [], "failed_ids": []}
+
+    result = await db.execute(select(WishlistItem).where(WishlistItem.id.in_(unique_ids)))
+    found_items = result.scalars().all()
+    items_by_id = {item.id: item for item in found_items}
+
+    queued_ids: List[int] = []
+    skipped_ids: List[int] = []
+    failed_ids: List[int] = []
+    now = datetime.utcnow()
+
+    for item_id in unique_ids:
+        item = items_by_id.get(item_id)
+        if not item:
+            failed_ids.append(item_id)
+            continue
+
+        if not _mark_item_for_search(item, now):
+            skipped_ids.append(item_id)
+            continue
+
+        queued_ids.append(item_id)
+
+    if queued_ids:
+        await db.commit()
+
+        from app.tasks.downloads import search_wishlist_item as search_task
+
+        for item_id in queued_ids:
+            search_task.delay(item_id)
+
+    return {
+        "requested": len(unique_ids),
+        "queued": len(queued_ids),
+        "skipped": len(skipped_ids),
+        "failed": len(failed_ids),
+        "queued_ids": queued_ids,
+        "skipped_ids": skipped_ids,
+        "failed_ids": failed_ids,
+    }
+
+
+@router.delete("/bulk", response_model=WishlistBulkResult)
+async def bulk_delete_wishlist_items(
+    payload: WishlistBulkDeleteRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete wishlist items in bulk."""
+    if not payload.all and not payload.item_ids:
+        raise HTTPException(status_code=400, detail="Provide item_ids or all=true")
+
+    deleted_ids: List[int] = []
+    skipped_ids: List[int] = []
+    failed_ids: List[int] = []
+
+    if payload.all:
+        query = select(WishlistItem)
+        if payload.status:
+            query = query.where(WishlistItem.status == payload.status)
+        result = await db.execute(query)
+        items_to_delete = result.scalars().all()
+        requested = len(items_to_delete)
+
+        for item in items_to_delete:
+            await _delete_item_with_download_cleanup(db, item)
+            deleted_ids.append(item.id)
+    else:
+        unique_ids = list(dict.fromkeys(payload.item_ids or []))
+        requested = len(unique_ids)
+        if unique_ids:
+            result = await db.execute(select(WishlistItem).where(WishlistItem.id.in_(unique_ids)))
+            found_items = result.scalars().all()
+            items_by_id = {item.id: item for item in found_items}
+
+            for item_id in unique_ids:
+                item = items_by_id.get(item_id)
+                if not item:
+                    failed_ids.append(item_id)
+                    continue
+                await _delete_item_with_download_cleanup(db, item)
+                deleted_ids.append(item_id)
+
+    if deleted_ids:
+        await db.commit()
+
+    return WishlistBulkResult(
+        requested=requested,
+        deleted=len(deleted_ids),
+        skipped=len(skipped_ids),
+        failed=len(failed_ids),
+        deleted_ids=deleted_ids,
+        skipped_ids=skipped_ids,
+        failed_ids=failed_ids,
+    )
+
+
+@router.post("/{item_id:int}/search")
 async def search_wishlist_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
@@ -281,9 +408,9 @@ async def search_wishlist_item(
             detail="Search is unavailable until Prowlarr is configured and reachable",
         )
 
-    item.status = WishlistStatus.SEARCHING
-    item.last_searched_at = datetime.utcnow()
-    item.search_count = (item.search_count or 0) + 1
+    if not _mark_item_for_search(item):
+        raise HTTPException(status_code=409, detail="Only wanted items can be searched")
+
     await db.commit()
 
     # Queue Celery task to search Prowlarr
@@ -291,6 +418,27 @@ async def search_wishlist_item(
     search_task.delay(item_id)
 
     return {"status": "search_queued", "id": item_id}
+
+
+def _mark_item_for_search(item: WishlistItem, now: Optional[datetime] = None) -> bool:
+    """Transition a wishlist item to searching when eligible."""
+    if item.status != WishlistStatus.WANTED:
+        return False
+
+    item.status = WishlistStatus.SEARCHING
+    item.last_searched_at = now or datetime.utcnow()
+    item.search_count = (item.search_count or 0) + 1
+    return True
+
+
+async def _delete_item_with_download_cleanup(db: AsyncSession, item: WishlistItem) -> None:
+    """Detach downloads and delete a wishlist item."""
+    await db.execute(
+        update(Download)
+        .where(Download.wishlist_id == item.id)
+        .values(wishlist_id=None)
+    )
+    await db.delete(item)
 
 
 def _wishlist_item_to_dict(item: WishlistItem) -> dict:
