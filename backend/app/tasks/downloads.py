@@ -36,10 +36,10 @@ async def _process_wishlist_async(search_all=False):
     """Async implementation of wishlist processing."""
     logger.info("Processing wishlist")
 
+    await cfg.ensure_cache()
+
     if not prowlarr_service.is_available:
         return {"status": "skipped", "reason": "Prowlarr not available"}
-
-    await cfg.ensure_cache()
 
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
@@ -158,6 +158,8 @@ async def _search_wishlist_item_async(item_id: int):
     """Async implementation of individual wishlist item search."""
     logger.info(f"Searching for wishlist item {item_id}")
 
+    await cfg.ensure_cache()
+
     if not prowlarr_service.is_available:
         return {"status": "skipped", "reason": "Prowlarr not configured"}
 
@@ -233,6 +235,8 @@ async def _search_for_album_async(
     """Async implementation of album search."""
     logger.info(f"Searching for album: {artist} - {album}")
 
+    await cfg.ensure_cache()
+
     if not prowlarr_service.is_available:
         return {"status": "error", "message": "Prowlarr not available"}
 
@@ -303,6 +307,8 @@ def grab_release(download_id: int, guid: str, indexer_id: int):
 async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
     """Async implementation of release grab."""
     logger.info(f"Grabbing release for download {download_id}")
+
+    await cfg.ensure_cache()
 
     if not prowlarr_service.is_available:
         return {"status": "error", "message": "Prowlarr not available"}

@@ -21,6 +21,7 @@ import {
 import { automationApi } from '@/lib/api'
 import type { AutomationRule, AutomationLog } from '@/lib/api'
 import { cn, formatDate } from '@/lib/utils'
+import toast from 'react-hot-toast'
 
 const TRIGGER_LABELS: Record<string, { label: string; color: string }> = {
   new_release: { label: 'New Release', color: 'bg-green-500/20 text-green-400' },
@@ -73,11 +74,22 @@ export default function AutomationPage() {
   const toggleMutation = useMutation({
     mutationFn: (id: number) => automationApi.toggleRule(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['automation-rules'] }),
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail
+      toast.error(detail || 'Failed to toggle automation rule')
+    },
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => automationApi.deleteRule(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['automation-rules'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['automation-rules'] })
+      toast.success('Automation rule deleted')
+    },
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail
+      toast.error(detail || 'Failed to delete automation rule')
+    },
   })
 
   const createMutation = useMutation({
@@ -86,6 +98,11 @@ export default function AutomationPage() {
       queryClient.invalidateQueries({ queryKey: ['automation-rules'] })
       setActiveTab('rules')
       setNewRule({ name: '', description: '', trigger: 'new_release', conditions: [], actions: [] })
+      toast.success('Automation rule created')
+    },
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail
+      toast.error(detail || 'Failed to create automation rule')
     },
   })
 

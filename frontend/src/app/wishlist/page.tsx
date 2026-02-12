@@ -1,11 +1,11 @@
 'use client'
 
 import Image from 'next/image'
+import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Heart,
-  Plus,
   Search,
   Trash2,
   MoreVertical,
@@ -26,7 +26,6 @@ type FilterStatus = 'all' | 'wanted' | 'searching' | 'found' | 'downloading' | '
 
 export default function WishlistPage() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
-  const [showAddModal, setShowAddModal] = useState(false)
   const queryClient = useQueryClient()
   const previousStatuses = useRef<Record<number, string>>({})
 
@@ -53,7 +52,6 @@ export default function WishlistPage() {
     mutationFn: (id: number) => wishlistApi.search(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['wishlist'] })
-      toast.success('Search queued. Results will appear as soon as indexers respond.')
     },
     onError: (error: any) => {
       const detail = error?.response?.data?.detail
@@ -65,7 +63,6 @@ export default function WishlistPage() {
     mutationFn: () => wishlistApi.searchAll(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['wishlist'] })
-      toast.success('Searching all wanted items')
     },
     onError: (error: any) => {
       const detail = error?.response?.data?.detail
@@ -123,13 +120,6 @@ export default function WishlistPage() {
             <Search className="w-4 h-4" />
             Search All
           </button>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="btn-primary"
-          >
-            <Plus className="w-4 h-4" />
-            Add to Wishlist
-          </button>
         </div>
       </div>
 
@@ -186,15 +176,15 @@ export default function WishlistPage() {
         <EmptyState
           icon={<Heart className="w-8 h-8" />}
           title="Wishlist is empty"
-          description="Add albums you want to find and download"
+          description="Search for albums and add them to your wishlist"
           action={
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="btn-primary"
+            <Link
+              href="/search"
+              className="btn-primary inline-flex items-center gap-2"
             >
-              <Plus className="w-4 h-4" />
-              Add to Wishlist
-            </button>
+              <Search className="w-4 h-4" />
+              Search for Music
+            </Link>
           }
         />
       )}
