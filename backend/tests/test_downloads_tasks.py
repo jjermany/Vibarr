@@ -101,6 +101,7 @@ async def test_search_wishlist_item_found_creates_download_row(monkeypatch):
     )
     monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
     monkeypatch.setattr(downloads.cfg, "get_bool", lambda *args, **kwargs: False)
+    monkeypatch.setattr(downloads.grab_release, "delay", lambda **kwargs: None)
 
     payload = await downloads._search_wishlist_item_async(item_id=1)
 
@@ -145,7 +146,8 @@ async def test_search_wishlist_item_without_results_returns_wanted(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_search_wishlist_item_auto_grab_enqueues_task_when_threshold_met(monkeypatch):
+async def test_search_wishlist_item_always_grabs_on_manual_search(monkeypatch):
+    """User-initiated search always grabs the best result regardless of settings."""
     item = WishlistItem(
         id=3,
         item_type="album",
@@ -153,7 +155,7 @@ async def test_search_wishlist_item_auto_grab_enqueues_task_when_threshold_met(m
         album_title="Album",
         status=WishlistStatus.WANTED,
         search_count=0,
-        auto_download=True,
+        auto_download=False,
     )
     session = _FakeSession(item)
     grabbed = {}
@@ -168,34 +170,20 @@ async def test_search_wishlist_item_auto_grab_enqueues_task_when_threshold_met(m
                     "indexer": "TestIndexer",
                     "indexer_id": 7,
                     "title": "Artist - Album FLAC",
-                    "score": 85,
+                    "score": 10,
                     "guid": "release-guid",
+                    "protocol": "torrent",
                 }
             ]
         ),
     )
     monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
-    monkeypatch.setattr(
-        downloads,
-        "download_client_service",
-        _FakeDownloadClientService(active_count=0, is_configured=True),
-    )
 
     def fake_delay(**kwargs):
         grabbed.update(kwargs)
 
-    def fake_get_bool(key, default=False):
-        return True if key == "auto_download_enabled" else default
-
-    def fake_get_float(key, default=0.0):
-        return 0.8 if key == "auto_download_confidence_threshold" else default
-
-    def fake_get_int(key, default=0):
-        return 3 if key == "max_concurrent_downloads" else default
-
-    monkeypatch.setattr(downloads.cfg, "get_bool", fake_get_bool)
-    monkeypatch.setattr(downloads.cfg, "get_float", fake_get_float)
-    monkeypatch.setattr(downloads.cfg, "get_int", fake_get_int)
+    # auto_download_enabled is False — grab should still happen
+    monkeypatch.setattr(downloads.cfg, "get_bool", lambda *args, **kwargs: False)
     monkeypatch.setattr(downloads.grab_release, "delay", fake_delay)
 
     payload = await downloads._search_wishlist_item_async(item_id=3)
@@ -206,6 +194,7 @@ async def test_search_wishlist_item_auto_grab_enqueues_task_when_threshold_met(m
         "download_id": 999,
         "guid": "release-guid",
         "indexer_id": 7,
+        "protocol": "torrent",
     }
 
 
