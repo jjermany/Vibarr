@@ -38,6 +38,31 @@ class SearchResultItem(BaseModel):
     external_ids: dict = Field(default_factory=dict)
 
 
+def _top_album_payload(
+    *,
+    title: Optional[str],
+    image_url: Optional[str] = None,
+    release_year: Optional[int] = None,
+    artist_name: Optional[str] = None,
+    source_album_id: Optional[str] = None,
+    source_provider_id: Optional[str] = None,
+    source_url: Optional[str] = None,
+    playcount: Optional[int] = None,
+) -> dict:
+    """Build a normalized top album payload for artist previews."""
+    payload = {
+        "title": title,
+        "image_url": image_url,
+        "release_year": release_year,
+        "artist_name": artist_name,
+        "source_album_id": source_album_id,
+        "source_provider_id": source_provider_id,
+        "source_url": source_url,
+        "playcount": playcount,
+    }
+    return {key: value for key, value in payload.items() if value is not None}
+
+
 def _deezer_image_from_payload(payload: dict, kind: str) -> Optional[str]:
     """Get the best Deezer image URL from a payload."""
     if not payload:
@@ -620,11 +645,14 @@ async def get_preview(
                     playcount=artist_obj.lastfm_playcount,
                     tags=artist_obj.tags or [],
                     top_albums=[
-                        {
-                            "title": a.title,
-                            "image_url": a.cover_url or a.thumb_url,
-                            "release_year": a.release_year,
-                        }
+                        _top_album_payload(
+                            title=a.title,
+                            image_url=a.cover_url or a.thumb_url,
+                            release_year=a.release_year,
+                            artist_name=artist_obj.name,
+                            source_album_id=str(a.id),
+                            source_provider_id=str(a.id),
+                        )
                         for a in albums
                     ],
                     source="local",
@@ -685,15 +713,27 @@ async def get_preview(
                     image_url=_deezer_image_from_payload(artist_data, "artist"),
                     tags=[],
                     top_albums=[
-                        {
-                            "title": album.get("title"),
-                            "image_url": _deezer_image_from_payload(album, "album"),
-                            "release_year": (
+                        _top_album_payload(
+                            title=album.get("title"),
+                            image_url=_deezer_image_from_payload(album, "album"),
+                            release_year=(
                                 int(album["release_date"][:4])
                                 if album.get("release_date")
                                 else None
                             ),
-                        }
+                            artist_name=(
+                                album.get("artist", {}).get("name")
+                                if album.get("artist")
+                                else artist_data.get("name", name)
+                            ),
+                            source_album_id=(
+                                str(album.get("id")) if album.get("id") else None
+                            ),
+                            source_provider_id=(
+                                str(album.get("id")) if album.get("id") else None
+                            ),
+                            source_url=album.get("link"),
+                        )
                         for album in top_albums
                     ],
                     tracks=[
@@ -735,6 +775,9 @@ async def get_preview(
             if matches:
                 first = matches[0]
                 artist_name = first.get("artist") or first.get("name", name)
+                top_albums = await ytmusic_service.search_albums(
+                    f"{artist_name} albums", limit=8
+                )
                 return PreviewResponse(
                     type="artist",
                     name=artist_name,
@@ -744,6 +787,32 @@ async def get_preview(
                         else None
                     ),
                     tags=[],
+                    top_albums=[
+                        _top_album_payload(
+                            title=album.get("title"),
+                            image_url=(
+                                (album.get("thumbnails") or [{}])[-1].get("url")
+                                if album.get("thumbnails")
+                                else None
+                            ),
+                            artist_name=(
+                                (album.get("artists") or [{}])[0].get("name")
+                                if album.get("artists")
+                                else artist_name
+                            ),
+                            source_album_id=(
+                                album.get("browseId")
+                                or album.get("playlistId")
+                                or album.get("audioPlaylistId")
+                            ),
+                            source_provider_id=(
+                                album.get("browseId")
+                                or album.get("playlistId")
+                                or album.get("audioPlaylistId")
+                            ),
+                        )
+                        for album in top_albums
+                    ],
                     source="ytmusic",
                 )
         elif type == "album":
@@ -780,7 +849,26 @@ async def get_preview(
                 listeners=data.get("listeners"),
                 playcount=data.get("playcount"),
                 tags=data.get("tags", []),
-                top_albums=data.get("top_albums", []),
+                top_albums=[
+                    _top_album_payload(
+                        title=album.get("title"),
+                        image_url=album.get("image_url"),
+                        artist_name=album.get("artist") or data.get("name"),
+                        source_album_id=(
+                            album.get("mbid")
+                            or album.get("url")
+                            or f"{data.get('name', name)}::{album.get('title', '')}"
+                        ),
+                        source_provider_id=(
+                            album.get("mbid")
+                            or album.get("url")
+                            or f"{data.get('name', name)}::{album.get('title', '')}"
+                        ),
+                        source_url=album.get("url"),
+                        playcount=album.get("playcount"),
+                    )
+                    for album in data.get("top_albums", [])
+                ],
                 source="lastfm",
                 url=data.get("url"),
             )

@@ -136,7 +136,16 @@ export interface PreviewData {
   listeners?: number
   playcount?: number
   tags: string[]
-  top_albums: { title: string; image_url?: string; playcount?: number; release_year?: number }[]
+  top_albums: {
+    title: string
+    image_url?: string
+    playcount?: number
+    release_year?: number
+    artist_name?: string
+    source_album_id?: string
+    source_provider_id?: string
+    source_url?: string
+  }[]
   tracks: { title: string; duration?: number; track_number?: number }[]
   source: string
   url?: string
