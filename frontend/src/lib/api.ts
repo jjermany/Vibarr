@@ -458,6 +458,8 @@ export interface AppUser {
   display_name: string
   avatar_url?: string
   bio?: string
+  preferred_language?: string
+  secondary_languages: string[]
   is_admin: boolean
   profile_public: boolean
   share_listening_activity: boolean
@@ -573,6 +575,32 @@ export interface AutomationStats {
   failed_executions: number
 }
 
+
+export interface DiscoveryLanguageFilter {
+  enabled: boolean
+  broadened: boolean
+  preferred_languages: string[]
+  filtered_count: number
+  fallback_without_metadata: number
+  note: string
+}
+
+export interface GenreDiscoveryResponse {
+  genre: string
+  artists: any[]
+  albums: any[]
+  related_genres: string[]
+  language_filter: DiscoveryLanguageFilter
+}
+
+export interface MoodDiscoveryResponse {
+  mood: string
+  audio_profile: Record<string, [number, number]>
+  tracks: any[]
+  albums: any[]
+  language_filter: DiscoveryLanguageFilter
+}
+
 export interface PlaylistTrack {
   id: string
   name: string
@@ -617,11 +645,12 @@ export const discoveryApi = {
   getHome: () => api.get('/api/discovery/home'),
   getSimilar: (artistId: number, limit?: number) =>
     api.get(`/api/discovery/similar/${artistId}`, { params: { limit } }),
-  getGenre: (genre: string, sort?: string) =>
-    api.get(`/api/discovery/genre/${genre}`, { params: { sort } }),
+  getGenre: (genre: string, sort?: string, broadenLanguage?: boolean) =>
+    api.get<GenreDiscoveryResponse>(`/api/discovery/genre/${genre}`, { params: { sort, broaden_language: broadenLanguage } }),
   getDecade: (decade: number, genre?: string) =>
     api.get(`/api/discovery/decade/${decade}`, { params: { genre } }),
-  getMood: (mood: string) => api.get(`/api/discovery/mood/${mood}`),
+  getMood: (mood: string, broadenLanguage?: boolean) =>
+    api.get<MoodDiscoveryResponse>(`/api/discovery/mood/${mood}`, { params: { broaden_language: broadenLanguage } }),
   getPlaylists: () => api.get('/api/discovery/playlists'),
   refresh: () => api.post('/api/discovery/refresh'),
 }
