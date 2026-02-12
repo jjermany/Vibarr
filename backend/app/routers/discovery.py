@@ -638,7 +638,10 @@ async def explore_genre(
 @router.get("/decade/{decade}")
 async def explore_decade(
     decade: int,
-    genre: Optional[str] = Query(None),
+    genre: Optional[str] = Query(
+        default=None,
+        description="Optional genre filter applied to decade exploration results.",
+    ),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
