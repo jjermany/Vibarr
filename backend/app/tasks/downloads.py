@@ -286,30 +286,13 @@ async def _search_wishlist_item_async(item_id: int):
                 await db.commit()
                 await db.refresh(download)
 
-                # Auto-grab if enabled and score meets threshold
-                if (
-                    cfg.get_bool("auto_download_enabled")
-                    and best_result.get("score", 0)
-                    >= cfg.get_float("auto_download_confidence_threshold", 0.8) * 100
-                ):
-                    active_count = 0
-                    if download_client_service.is_configured:
-                        active_count += await download_client_service.get_active_count()
-                    if sabnzbd_service.is_configured and cfg.get_bool("sabnzbd_enabled"):
-                        active_count += await sabnzbd_service.get_active_count()
-
-                    if active_count < cfg.get_int("max_concurrent_downloads", 3):
-                        grab_release.delay(
-                            download_id=download.id,
-                            guid=best_result.get("guid"),
-                            indexer_id=best_result.get("indexer_id"),
-                            protocol=best_result.get("protocol"),
-                        )
-                    else:
-                        logger.info(
-                            f"Skipping auto-grab for '{album_title}': "
-                            f"concurrent limit reached ({active_count}/{cfg.get_int('max_concurrent_downloads', 3)})"
-                        )
+                # Always grab for user-initiated single-item searches
+                grab_release.delay(
+                    download_id=download.id,
+                    guid=best_result.get("guid"),
+                    indexer_id=best_result.get("indexer_id"),
+                    protocol=best_result.get("protocol"),
+                )
 
                 return {
                     "status": "found",
