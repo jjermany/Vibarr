@@ -64,3 +64,37 @@ def test_search_album_relevance_gate_prevents_irrelevant_first_place(monkeypatch
     assert ranked[0]["title"] == "The Weeknd - Dawn FM 320"
     assert ranked[0]["passes_text_relevance"] is True
     assert ranked[1]["passes_text_relevance"] is False
+
+
+def test_score_result_handles_nullable_numeric_fields():
+    service = ProwlarrService()
+
+    nullable_numeric_match = {
+        "title": "The Weeknd - Dawn FM FLAC",
+        "quality": "flac",
+        "seeders": None,
+        "size": None,
+    }
+
+    score = service._score_result(nullable_numeric_match, artist="The Weeknd", album="Dawn FM")
+
+    assert isinstance(score, float)
+    assert "text_relevance" in nullable_numeric_match
+    assert "passes_text_relevance" in nullable_numeric_match
+
+
+def test_score_result_handles_non_numeric_fields():
+    service = ProwlarrService()
+
+    non_numeric_match = {
+        "title": "The Weeknd - Dawn FM FLAC",
+        "quality": "flac",
+        "seeders": "many",
+        "size": "large",
+    }
+
+    score = service._score_result(non_numeric_match, artist="The Weeknd", album="Dawn FM")
+
+    assert isinstance(score, float)
+    assert "text_relevance" in non_numeric_match
+    assert "passes_text_relevance" in non_numeric_match

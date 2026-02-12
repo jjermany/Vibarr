@@ -144,13 +144,15 @@ class ProwlarrService:
             # Parse and normalize results
             normalized = []
             for result in results:
+                seeders = self._coerce_nullable_number(result.get("seeders"))
+                size = self._coerce_nullable_number(result.get("size"))
                 normalized.append({
                     "guid": result.get("guid"),
                     "indexer": result.get("indexer"),
                     "indexer_id": result.get("indexerId"),
                     "title": result.get("title"),
-                    "size": result.get("size"),
-                    "seeders": result.get("seeders"),
+                    "size": size,
+                    "seeders": seeders,
                     "leechers": result.get("leechers"),
                     "protocol": result.get("protocol"),
                     "download_url": result.get("downloadUrl"),
@@ -343,7 +345,7 @@ class ProwlarrService:
                 score += 22
 
         # Seeders (max 15 points)
-        seeders = result.get("seeders", 0)
+        seeders = self._coerce_nullable_number(result.get("seeders"))
         if seeders > 100:
             score += 15
         elif seeders > 50:
@@ -356,7 +358,7 @@ class ProwlarrService:
             score += 3
 
         # Size sanity check (max 5 points)
-        size = result.get("size", 0)
+        size = self._coerce_nullable_number(result.get("size"))
         size_mb = size / (1024 * 1024)
         if 50 < size_mb < 2000:  # Reasonable album size
             score += 5
@@ -383,6 +385,12 @@ class ProwlarrService:
         """Return minimum token-overlap score required for a result to rank first."""
         threshold = cfg.get_float("prowlarr_min_title_match_score", 0.6)
         return min(max(threshold, 0.0), 1.0)
+
+    def _coerce_nullable_number(self, value: Any) -> float:
+        """Return numeric values as float and fall back to 0 for nullable/non-numeric input."""
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        return 0.0
 
 
 # Singleton instance
