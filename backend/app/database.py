@@ -1,6 +1,7 @@
 """Database configuration and session management."""
 
 import asyncio
+import logging
 import os
 
 from sqlalchemy import text
@@ -37,6 +38,42 @@ AsyncSessionLocal = async_sessionmaker(
 
 # Base class for models
 Base = declarative_base()
+logger = logging.getLogger(__name__)
+
+
+def _is_transient_database_startup_error(exc: BaseException) -> bool:
+    """Return whether an exception is likely transient during DB startup."""
+    if isinstance(exc, (ConnectionRefusedError, OperationalError)):
+        return True
+
+    if isinstance(exc, DBAPIError):
+        original_error = getattr(exc, "orig", None)
+        if original_error is None:
+            return True
+
+        transient_error_names = {
+            "CannotConnectNowError",
+            "ConnectionDoesNotExistError",
+            "ConnectionFailureError",
+            "ConnectionRefusedError",
+            "TooManyConnectionsError",
+        }
+        if original_error.__class__.__name__ in transient_error_names:
+            return True
+
+        message = str(original_error).lower()
+        transient_message_markers = (
+            "starting up",
+            "in recovery mode",
+            "cannot connect now",
+            "connection refused",
+            "the database system is starting up",
+            "the database system is in recovery mode",
+        )
+        if any(marker in message for marker in transient_message_markers):
+            return True
+
+    return False
 
 
 async def _wait_for_database(max_attempts: int = 30, retry_delay_seconds: float = 1.0) -> None:
@@ -97,10 +134,30 @@ async def _apply_schema_migrations(conn) -> None:
 
 async def init_db() -> None:
     """Initialize database tables."""
-    await _wait_for_database()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await _apply_schema_migrations(conn)
+    max_attempts = 30
+    initial_retry_delay_seconds = 1.0
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                await _apply_schema_migrations(conn)
+            return
+        except (ConnectionRefusedError, OperationalError, DBAPIError) as exc:
+            if not _is_transient_database_startup_error(exc) or attempt == max_attempts:
+                raise
+
+            retry_delay = initial_retry_delay_seconds * (2 ** (attempt - 1))
+            logger.warning(
+                "Database initialization attempt failed; retrying",
+                extra={
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "exception_class": exc.__class__.__name__,
+                    "retry_delay_seconds": retry_delay,
+                },
+            )
+            await asyncio.sleep(retry_delay)
 
 
 async def get_db() -> AsyncSession:
