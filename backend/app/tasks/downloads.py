@@ -2,6 +2,9 @@
 
 import logging
 from datetime import datetime
+import asyncio
+
+from celery.signals import worker_process_shutdown
 
 from app.celery_app import celery_app
 from app.database import AsyncSessionLocal
@@ -15,15 +18,52 @@ from app.models.download import Download, DownloadStatus
 
 logger = logging.getLogger(__name__)
 
+_task_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_task_loop() -> asyncio.AbstractEventLoop:
+    """Get or create the persistent worker event loop."""
+    global _task_loop
+
+    if _task_loop is None or _task_loop.is_closed():
+        _task_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_task_loop)
+
+    return _task_loop
+
 
 def _run_async(coro):
     """Run an async coroutine from a sync Celery task."""
-    import asyncio
-    loop = asyncio.new_event_loop()
+    loop = _get_task_loop()
+    return loop.run_until_complete(coro)
+
+
+async def _close_task_resources() -> None:
+    """Close async resources bound to the worker task loop."""
+    await prowlarr_service.close()
+
+
+def _shutdown_task_loop(**_kwargs) -> None:
+    """Cleanup persistent task loop when a Celery worker process exits."""
+    global _task_loop
+
+    if _task_loop is None or _task_loop.is_closed():
+        _task_loop = None
+        return
+
     try:
-        return loop.run_until_complete(coro)
+        _task_loop.run_until_complete(_close_task_resources())
+    except Exception as exc:
+        logger.warning("Failed to close async task resources during shutdown: %s", exc)
     finally:
-        loop.close()
+        _task_loop.close()
+        _task_loop = None
+
+
+@worker_process_shutdown.connect
+def _on_worker_process_shutdown(**kwargs):
+    """Handle Celery worker process shutdown."""
+    _shutdown_task_loop(**kwargs)
 
 
 async def _sync_wishlist_status(db, download: Download, target_status: WishlistStatus, message: str = None):

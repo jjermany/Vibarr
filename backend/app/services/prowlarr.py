@@ -2,6 +2,7 @@
 
 from typing import Optional, List, Dict, Any
 import logging
+import asyncio
 
 import httpx
 
@@ -16,19 +17,48 @@ class ProwlarrService:
     def __init__(self):
         """Initialize Prowlarr client."""
         self._client: Optional[httpx.AsyncClient] = None
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
 
     @property
     def client(self) -> Optional[httpx.AsyncClient]:
         """Get HTTP client."""
         url = cfg.get_optional("prowlarr_url")
         api_key = cfg.get_optional("prowlarr_api_key")
+
+        current_loop = None
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+
+        if self._client is not None and (
+            self._client.is_closed
+            or (
+                current_loop is not None
+                and self._client_loop is not None
+                and self._client_loop is not current_loop
+            )
+        ):
+            self._client = None
+            self._client_loop = None
+
         if self._client is None and url and api_key:
             self._client = httpx.AsyncClient(
                 base_url=url.rstrip("/"),
                 headers={"X-Api-Key": api_key},
                 timeout=30.0,
             )
+            self._client_loop = current_loop
+
         return self._client
+
+    async def close(self) -> None:
+        """Close any cached async HTTP client."""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+
+        self._client = None
+        self._client_loop = None
 
     @property
     def is_available(self) -> bool:
