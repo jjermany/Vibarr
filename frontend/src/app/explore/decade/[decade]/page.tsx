@@ -14,16 +14,18 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import toast from 'react-hot-toast'
+import { useBackendReadiness } from '@/lib/useBackendReadiness'
 
 export default function DecadeExplorePage() {
   const params = useParams()
   const decade = parseInt(params.decade as string, 10)
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
+  const { backendReady } = useBackendReadiness()
 
   const { data, isLoading } = useQuery({
     queryKey: ['discovery', 'decade', decade],
     queryFn: () => discoveryApi.getDecade(decade),
-    enabled: !isNaN(decade),
+    enabled: !isNaN(decade) && backendReady,
   })
 
   const result = data?.data
@@ -81,9 +83,10 @@ export default function DecadeExplorePage() {
         </p>
       </div>
 
-      {isLoading ? (
+      {!backendReady || isLoading ? (
         <div className="flex items-center justify-center py-16">
           <LoadingSpinner size="lg" />
+          {!backendReady && <span className="ml-3 text-sm text-surface-400">Starting up discovery services...</span>}
         </div>
       ) : artists.length === 0 && albums.length === 0 ? (
         <EmptyState

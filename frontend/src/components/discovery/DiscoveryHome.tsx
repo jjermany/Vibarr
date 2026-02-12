@@ -14,7 +14,7 @@ import {
   Headphones,
   TrendingUp,
 } from 'lucide-react'
-import { discoveryApi, libraryApi, statsApi, wishlistApi, healthApi } from '@/lib/api'
+import { discoveryApi, libraryApi, statsApi, wishlistApi } from '@/lib/api'
 import type { SearchResult } from '@/lib/api'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { AlbumCard } from '@/components/ui/AlbumCard'
@@ -23,22 +23,13 @@ import { PreviewModal } from '@/components/ui/PreviewModal'
 import { LoadingPage } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import toast from 'react-hot-toast'
+import { useBackendReadiness } from '@/lib/useBackendReadiness'
 
 export function DiscoveryHome() {
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: readinessData } = useQuery({
-    queryKey: ['backend-readiness'],
-    queryFn: () => healthApi.readiness(),
-    retry: false,
-    refetchInterval: (query) => {
-      const status = query.state.data?.data?.status
-      return status === 'ready' ? false : 3000
-    },
-  })
-
-  const backendReady = readinessData?.data?.status === 'ready'
+  const { backendReady } = useBackendReadiness()
 
   const { data: discoveryData, isLoading: discoveryLoading } = useQuery({
     queryKey: ['discovery', 'home'],

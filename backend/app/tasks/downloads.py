@@ -1,7 +1,7 @@
 """Download management tasks."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 
 from celery.signals import worker_process_shutdown
@@ -569,6 +569,16 @@ async def _check_qbittorrent_download(db, download: Download, completed_dir: str
     torrent = await download_client_service.get_torrent(download.download_id)
 
     if not torrent:
+        if download.started_at and datetime.utcnow() - download.started_at > timedelta(minutes=3):
+            download.status = DownloadStatus.FAILED
+            download.completed_at = datetime.utcnow()
+            download.status_message = "Download missing in qBittorrent after being queued"
+            await _sync_wishlist_status(
+                db,
+                download,
+                WishlistStatus.FAILED,
+                message=download.status_message,
+            )
         logger.warning(
             f"Torrent {download.download_id} not found in client "
             f"for download {download.id}"
@@ -699,8 +709,7 @@ async def _check_download_status_async():
         # Get all downloads that are actively downloading
         result = await db.execute(
             select(Download).where(
-                Download.status == DownloadStatus.DOWNLOADING,
-                Download.download_id.isnot(None),
+                Download.status.in_([DownloadStatus.DOWNLOADING, DownloadStatus.QUEUED])
             )
         )
         active_downloads = result.scalars().all()
@@ -721,6 +730,19 @@ async def _check_download_status_async():
                             f"Download {download.id} assigned to SABnzbd but SABnzbd not configured"
                         )
                         continue
+                    if not download.download_id:
+                        download.status = DownloadStatus.FAILED
+                        download.completed_at = datetime.utcnow()
+                        download.status_message = "SABnzbd did not return a download ID"
+                        await _sync_wishlist_status(
+                            db,
+                            download,
+                            WishlistStatus.FAILED,
+                            message=download.status_message,
+                        )
+                        updated += 1
+                        await db.commit()
+                        continue
                     was_completed = await _check_sabnzbd_download(db, download)
                 elif client_type == "qbittorrent" or client_type is None:
                     # Default to qBittorrent for legacy records with no client set
@@ -728,6 +750,32 @@ async def _check_download_status_async():
                         logger.warning(
                             f"Download {download.id} assigned to qBittorrent but qBittorrent not configured"
                         )
+                        continue
+                    if not download.download_id:
+                        resolved_hash = await download_client_service.find_torrent_hash(
+                            release_title=download.release_title or download.album_title,
+                            timeout_seconds=1,
+                            poll_interval_seconds=0.5,
+                        )
+                        if resolved_hash:
+                            download.download_id = resolved_hash
+                            download.status = DownloadStatus.DOWNLOADING
+                            download.status_message = "Download accepted by qBittorrent"
+                        elif download.started_at and datetime.utcnow() - download.started_at > timedelta(minutes=3):
+                            download.status = DownloadStatus.FAILED
+                            download.completed_at = datetime.utcnow()
+                            download.status_message = "qBittorrent did not expose the queued download"
+                            await _sync_wishlist_status(
+                                db,
+                                download,
+                                WishlistStatus.FAILED,
+                                message=download.status_message,
+                            )
+                        else:
+                            download.status = DownloadStatus.QUEUED
+                            download.status_message = "Waiting for qBittorrent to register download"
+                        updated += 1
+                        await db.commit()
                         continue
                     was_completed = await _check_qbittorrent_download(db, download, completed_dir)
                 else:

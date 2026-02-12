@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search as SearchIcon, Music, Disc, User, Check, Plus, AlertCircle, ListMusic, Loader2 } from 'lucide-react'
-import { searchApi, wishlistApi, healthApi } from '@/lib/api'
+import { searchApi, wishlistApi } from '@/lib/api'
 import type { SearchResult, PlaylistResolveResult, PlaylistTrack } from '@/lib/api'
 import { AlbumCard } from '@/components/ui/AlbumCard'
 import { ArtistCard } from '@/components/ui/ArtistCard'
@@ -13,6 +13,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
+import { useBackendReadiness } from '@/lib/useBackendReadiness'
 
 type SearchType = 'all' | 'artists' | 'albums' | 'tracks'
 type AddBehavior = 'wishlist_only' | 'search_now' | 'auto_download'
@@ -76,14 +77,7 @@ function SearchPageContent() {
     return () => clearTimeout(timer)
   }, [query, urlIsPlaylist])
 
-  const { data: readinessData, isLoading: readinessLoading } = useQuery({
-    queryKey: ['backend-readiness'],
-    queryFn: () => healthApi.readiness(),
-    retry: false,
-    refetchInterval: (query) => (query.state.data?.data?.status === 'ready' ? false : 3000),
-  })
-
-  const backendReady = readinessData?.data?.status === 'ready'
+  const { backendReady, isLoading: readinessLoading } = useBackendReadiness()
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['search', debouncedQuery, searchType],

@@ -267,6 +267,9 @@ class _FakeClientForStatus:
     async def delete_torrent(self, _download_id, delete_files=False):
         return None
 
+    async def find_torrent_hash(self, release_title, timeout_seconds=1, poll_interval_seconds=0.5):
+        return None
+
 
 class _ImportResult:
     def __init__(self, success, error=None):
@@ -458,6 +461,33 @@ async def test_grab_ack_without_client_id_marks_downloading(monkeypatch):
     assert download.status == DownloadStatus.DOWNLOADING
     assert "waiting for download id" in (download.status_message or "").lower()
     assert wishlist.status == WishlistStatus.DOWNLOADING
+
+
+@pytest.mark.asyncio
+async def test_check_status_marks_missing_qbit_registration_failed_after_timeout(monkeypatch):
+    wishlist = WishlistItem(id=23, item_type="album", status=WishlistStatus.DOWNLOADING)
+    download = downloads.Download(
+        id=203,
+        artist_name="Artist",
+        album_title="Album",
+        release_title="Artist - Album",
+        status=DownloadStatus.DOWNLOADING,
+        started_at=downloads.datetime.utcnow() - downloads.timedelta(minutes=4),
+        wishlist_id=23,
+        download_client="qbittorrent",
+    )
+    session = _FakeMultiSession(download=download, wishlist=wishlist)
+
+    monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(downloads, "download_client_service", _FakeClientForStatus(None))
+
+    payload = await downloads._check_download_status_async()
+
+    assert payload["updated"] == 1
+    assert download.status == DownloadStatus.FAILED
+    assert "did not expose" in (download.status_message or "")
+    assert wishlist.status == WishlistStatus.FAILED
 
 
 def _new_value_coro(value):

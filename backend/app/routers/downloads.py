@@ -48,10 +48,14 @@ class DownloadResponse(BaseModel):
     leechers: Optional[int] = None
     download_speed: Optional[int] = None
     eta_seconds: Optional[int] = None
+    download_client: Optional[str] = None
+    download_id: Optional[str] = None
+    download_path: Optional[str] = None
     source: str = "manual"
     beets_imported: bool = False
     final_path: Optional[str] = None
     created_at: datetime
+    updated_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 

@@ -13,6 +13,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import toast from 'react-hot-toast'
+import { useBackendReadiness } from '@/lib/useBackendReadiness'
 
 const moodMeta: Record<string, { icon: string; description: string }> = {
   energetic: { icon: '', description: 'High energy, fast tempo tracks to get you moving' },
@@ -28,11 +29,12 @@ export default function MoodExplorePage() {
   const mood = params.mood as string
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
   const [broadenLanguage, setBroadenLanguage] = useState(false)
+  const { backendReady } = useBackendReadiness()
 
   const { data, isLoading } = useQuery({
     queryKey: ['discovery', 'mood', mood, broadenLanguage],
     queryFn: () => discoveryApi.getMood(mood, broadenLanguage),
-    enabled: !!mood,
+    enabled: !!mood && backendReady,
   })
 
   const result = data?.data
@@ -108,9 +110,10 @@ export default function MoodExplorePage() {
         </div>
       )}
 
-      {isLoading ? (
+      {!backendReady || isLoading ? (
         <div className="flex items-center justify-center py-16">
           <LoadingSpinner size="lg" />
+          {!backendReady && <span className="ml-3 text-sm text-surface-400">Starting up discovery services...</span>}
         </div>
       ) : tracks.length === 0 && albums.length === 0 ? (
         <EmptyState

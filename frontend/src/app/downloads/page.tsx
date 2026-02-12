@@ -48,12 +48,16 @@ export default function DownloadsPage() {
     queryKey: ['download-queue'],
     queryFn: () => downloadsApi.queue(),
     refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     enabled: activeTab === 'queue',
   })
 
   const { data: historyData, isLoading: historyLoading } = useQuery({
     queryKey: ['download-history'],
     queryFn: () => downloadsApi.history(100),
+    refetchInterval: activeTab === 'history' ? 10000 : false,
+    refetchOnWindowFocus: true,
     enabled: activeTab === 'history',
   })
 
@@ -358,6 +362,11 @@ function HistoryTab({ downloads, isLoading, onRetry, selectedIds, onToggleSelect
 
 function DownloadCard({ download, onCancel, onRetry, isSelected, onToggleSelection }: { download: DownloadType; onCancel?: () => void; onRetry?: () => void; isSelected: boolean; onToggleSelection: () => void }) {
   const isActive = ['downloading', 'searching', 'queued', 'importing'].includes(download.status)
+  const statusSummary = [
+    download.download_client ? `Client: ${download.download_client}` : null,
+    download.download_id ? `ID: ${download.download_id}` : null,
+    download.download_path ? `Path: ${download.download_path}` : null,
+  ].filter(Boolean).join(' · ')
 
   return (
     <div className="card p-4">
@@ -379,7 +388,11 @@ function DownloadCard({ download, onCancel, onRetry, isSelected, onToggleSelecti
               {download.indexer_name && <><span>&middot;</span><span>{download.indexer_name}</span></>}
               {download.source !== 'manual' && <><span>&middot;</span><span className="capitalize">{download.source}</span></>}
             </div>
-            {download.status_message && <p className="text-xs text-surface-500 mt-1 truncate">{download.status_message}</p>}
+            {download.status_message && <p className="text-xs text-surface-500 mt-1">{download.status_message}</p>}
+            {statusSummary && <p className="text-xs text-surface-500 mt-1 break-all">{statusSummary}</p>}
+            <p className="text-[11px] text-surface-600 mt-1">
+              Updated {new Date(download.updated_at || download.created_at).toLocaleString()}
+            </p>
           </div>
         </div>
 
