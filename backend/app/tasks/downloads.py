@@ -438,11 +438,19 @@ async def _grab_release_async(download_id: int, guid: str, indexer_id: int):
             await db.commit()
 
             # Grab via Prowlarr (sends to download client)
-            download_client_id = await prowlarr_service.grab(guid, indexer_id)
+            grab_result = await prowlarr_service.grab(guid, indexer_id)
+            grab_success = bool(grab_result.get("success"))
+            download_client_id = grab_result.get("download_id")
 
-            if download_client_id:
+            if grab_success:
                 download.status = DownloadStatus.DOWNLOADING
-                download.download_id = str(download_client_id)
+                if download_client_id:
+                    download.download_id = str(download_client_id)
+                    download.status_message = None
+                else:
+                    download.status_message = (
+                        "Prowlarr acknowledged release grab; waiting for download client to report ID"
+                    )
                 download.started_at = datetime.utcnow()
                 await db.commit()
 

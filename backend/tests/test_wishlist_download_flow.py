@@ -137,7 +137,9 @@ class _FakeProwlarrGrab:
         self.grab_result = grab_result
 
     async def grab(self, *_args, **_kwargs):
-        return self.grab_result
+        if isinstance(self.grab_result, dict):
+            return self.grab_result
+        return {"success": bool(self.grab_result), "download_id": self.grab_result}
 
 
 class _FakeImportResult:
