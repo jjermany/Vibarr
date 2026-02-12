@@ -89,6 +89,7 @@ class GrabRequest(BaseModel):
     seeders: Optional[int] = None
     indexer_name: Optional[str] = None
     protocol: Optional[str] = None  # "torrent" or "usenet"
+    download_url: Optional[str] = None
 
 
 class DownloadStatsResponse(BaseModel):
@@ -516,6 +517,8 @@ async def grab_release(
         guid=request.guid,
         indexer_id=request.indexer_id,
         protocol=request.protocol,
+        download_url=request.download_url,
+        release_title=request.release_title,
     )
 
     await db.refresh(download)

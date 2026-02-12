@@ -2,12 +2,16 @@
 
 from typing import Optional, List, Dict, Any
 import logging
+import re
+import asyncio
 
 import httpx
 
 from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
+
+_NON_WORD_RE = re.compile(r"[^a-z0-9]+")
 
 
 class TorrentInfo:
@@ -197,6 +201,35 @@ class DownloadClientService:
         except Exception as e:
             logger.error(f"Error adding torrent: {e}")
             return False
+
+    @staticmethod
+    def _normalize_title(value: str) -> str:
+        """Normalize title for fuzzy comparisons."""
+        return _NON_WORD_RE.sub("", (value or "").lower())
+
+    async def find_torrent_hash(
+        self,
+        release_title: str,
+        timeout_seconds: int = 15,
+        poll_interval_seconds: float = 1.0,
+    ) -> Optional[str]:
+        """Poll qBittorrent and return the hash of the added torrent when found."""
+        normalized_target = self._normalize_title(release_title)
+        if not normalized_target:
+            return None
+
+        elapsed = 0.0
+        while elapsed <= timeout_seconds:
+            torrents = await self.get_torrents()
+            for torrent in torrents:
+                normalized_name = self._normalize_title(torrent.name)
+                if normalized_name == normalized_target or normalized_target in normalized_name:
+                    return torrent.hash
+
+            await asyncio.sleep(poll_interval_seconds)
+            elapsed += poll_interval_seconds
+
+        return None
 
     async def get_torrent(self, torrent_hash: str) -> Optional[TorrentInfo]:
         """Get info for a specific torrent."""

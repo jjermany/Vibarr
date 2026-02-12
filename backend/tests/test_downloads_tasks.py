@@ -95,6 +95,7 @@ async def test_search_wishlist_item_found_creates_download_row(monkeypatch):
                     "leechers": 1,
                     "score": 10,
                     "guid": "abc",
+                    "download_url": "https://example.com/a.torrent",
                 }
             ]
         ),
@@ -173,6 +174,7 @@ async def test_search_wishlist_item_always_grabs_on_manual_search(monkeypatch):
                     "score": 10,
                     "guid": "release-guid",
                     "protocol": "torrent",
+                    "download_url": "https://example.com/release.torrent",
                 }
             ]
         ),
@@ -195,6 +197,8 @@ async def test_search_wishlist_item_always_grabs_on_manual_search(monkeypatch):
         "guid": "release-guid",
         "indexer_id": 7,
         "protocol": "torrent",
+        "download_url": "https://example.com/release.torrent",
+        "release_title": "Artist - Album FLAC",
     }
 
 
@@ -282,6 +286,29 @@ class _FakeBeetsService:
         return self._result
 
 
+
+
+class _FakeDirectDownloadClient:
+    def __init__(self, *, add_success=True, torrent_hash=None, is_configured=True):
+        self.is_configured = is_configured
+        self._add_success = add_success
+        self._torrent_hash = torrent_hash
+
+    async def add_torrent_url(self, _download_url):
+        return self._add_success
+
+    async def find_torrent_hash(self, release_title):
+        return self._torrent_hash
+
+
+class _FakeSabService:
+    def __init__(self, *, is_configured=False, nzo_id=None):
+        self.is_configured = is_configured
+        self._nzo_id = nzo_id
+
+    async def add_nzb_url(self, _download_url, name=None):
+        return self._nzo_id
+
 class _FakeProwlarrGrabService:
     def __init__(self, grab_result):
         self.is_available = True
@@ -360,16 +387,23 @@ async def test_grab_or_import_failures_mark_wishlist_failed(monkeypatch):
     monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
     monkeypatch.setattr(
         downloads,
-        "prowlarr_service",
-        _FakeProwlarrGrabService(grab_result=None),
+        "download_client_service",
+        _FakeDirectDownloadClient(add_success=False),
     )
 
-    grab_result = await downloads._grab_release_async(download_id=200, guid="g", indexer_id=1)
+    grab_result = await downloads._grab_release_async(
+        download_id=200,
+        guid="g",
+        indexer_id=1,
+        protocol="torrent",
+        download_url="https://example.com/a.torrent",
+        release_title="Artist - Album",
+    )
 
     assert grab_result["status"] == "error"
     assert download.status == DownloadStatus.FAILED
     assert wishlist.status == WishlistStatus.FAILED
-    assert "Failed to grab" in (wishlist.notes or "")
+    assert "Failed to add release" in (wishlist.notes or "")
 
     wishlist.status = WishlistStatus.DOWNLOADING
     download.status = DownloadStatus.IMPORTING
@@ -406,16 +440,23 @@ async def test_grab_ack_without_client_id_marks_downloading(monkeypatch):
     monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
     monkeypatch.setattr(
         downloads,
-        "prowlarr_service",
-        _FakeProwlarrGrabService(grab_result={"success": True, "download_id": None}),
+        "download_client_service",
+        _FakeDirectDownloadClient(add_success=True, torrent_hash=None),
     )
 
-    grab_result = await downloads._grab_release_async(download_id=201, guid="g", indexer_id=1)
+    grab_result = await downloads._grab_release_async(
+        download_id=201,
+        guid="g",
+        indexer_id=1,
+        protocol="torrent",
+        download_url="https://example.com/a.torrent",
+        release_title="Artist - Album",
+    )
 
     assert grab_result["status"] == "grabbed"
     assert grab_result["client_id"] is None
     assert download.status == DownloadStatus.DOWNLOADING
-    assert "waiting for download client" in (download.status_message or "").lower()
+    assert "waiting for download id" in (download.status_message or "").lower()
     assert wishlist.status == WishlistStatus.DOWNLOADING
 
 
