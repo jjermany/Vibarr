@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import Link from 'next/link'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Sparkles,
   Radio,
@@ -26,6 +26,7 @@ import toast from 'react-hot-toast'
 
 export function DiscoveryHome() {
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
+  const queryClient = useQueryClient()
 
   const { data: readinessData } = useQuery({
     queryKey: ['backend-readiness'],
@@ -89,12 +90,13 @@ export function DiscoveryHome() {
         priority: 'normal',
         auto_download: false,
       })
+      queryClient.invalidateQueries({ queryKey: ['wishlist'] })
       toast.success(`Added "${item.name}" to wishlist`)
       setPreviewItem(null)
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to add to wishlist')
     }
-  }, [])
+  }, [queryClient])
 
   if (!backendReady) {
     return <LoadingPage message="Starting up Vibarr services..." />

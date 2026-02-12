@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search as SearchIcon, Music, Disc, User, Check, Plus, AlertCircle, ListMusic, Loader2 } from 'lucide-react'
 import { searchApi, wishlistApi, healthApi } from '@/lib/api'
 import type { SearchResult, PlaylistResolveResult, PlaylistTrack } from '@/lib/api'
@@ -46,6 +46,7 @@ export default function SearchPage() {
 }
 
 function SearchPageContent() {
+  const queryClient = useQueryClient()
   const searchParams = useSearchParams()
   const initialQuery = searchParams.get('q') || ''
   const [query, setQuery] = useState(initialQuery)
@@ -112,12 +113,13 @@ function SearchPageContent() {
         auto_download: false,
         notes: isTrack ? 'Track request from discover/search' : undefined,
       })
+      queryClient.invalidateQueries({ queryKey: ['wishlist'] })
       toast.success(`Added "${item.name}" to wishlist`)
       setPreviewItem(null)
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to add to wishlist')
     }
-  }, [])
+  }, [queryClient])
 
   // ---- Playlist URL handlers ----
 
@@ -166,13 +168,14 @@ function SearchPageContent() {
           // Skip duplicates / failures for individual tracks
         }
       }
+      queryClient.invalidateQueries({ queryKey: ['wishlist'] })
       toast.success(`Added playlist + ${added - 1} tracks to wishlist`)
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to add playlist to wishlist')
     } finally {
       setIsAddingPlaylist(false)
     }
-  }, [])
+  }, [queryClient])
 
   const handleAddSingleTrack = useCallback(async (track: PlaylistTrack, playlistTitle: string) => {
     try {
@@ -185,11 +188,12 @@ function SearchPageContent() {
         auto_download: false,
         notes: `From playlist: ${playlistTitle}`,
       })
+      queryClient.invalidateQueries({ queryKey: ['wishlist'] })
       toast.success(`Added "${track.name}" to wishlist`)
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to add track to wishlist')
     }
-  }, [])
+  }, [queryClient])
 
   return (
     <div className="space-y-6">
