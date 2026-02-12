@@ -37,13 +37,38 @@ class DeezerService:
             response.raise_for_status()
             return response.json()
 
+    def _log_failure(
+        self,
+        *,
+        source: str,
+        endpoint_type: str,
+        exc: Exception,
+        query: str | None = None,
+        identifier: int | str | None = None,
+    ) -> None:
+        """Log actionable Deezer failures with exception details and context."""
+        logger.exception(
+            "Deezer request failed | source=%s | endpoint=%s | query=%r | identifier=%r | exc_type=%s | exc=%r",
+            source,
+            endpoint_type,
+            query,
+            identifier,
+            type(exc).__name__,
+            exc,
+        )
+
     async def search_artists(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         """Search artists by name."""
         try:
             payload = await self._get("/search/artist", {"q": query, "limit": limit})
             return payload.get("data", []) or []
         except Exception as exc:
-            logger.error(f"Deezer artist search failed: {exc}")
+            self._log_failure(
+                source="deezer artist",
+                endpoint_type="search",
+                query=query,
+                exc=exc,
+            )
             return []
 
     async def search_albums(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
@@ -52,7 +77,12 @@ class DeezerService:
             payload = await self._get("/search/album", {"q": query, "limit": limit})
             return payload.get("data", []) or []
         except Exception as exc:
-            logger.error(f"Deezer album search failed: {exc}")
+            self._log_failure(
+                source="deezer album",
+                endpoint_type="search",
+                query=query,
+                exc=exc,
+            )
             return []
 
     async def search_tracks(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
@@ -61,7 +91,12 @@ class DeezerService:
             payload = await self._get("/search/track", {"q": query, "limit": limit})
             return payload.get("data", []) or []
         except Exception as exc:
-            logger.error(f"Deezer track search failed: {exc}")
+            self._log_failure(
+                source="deezer track",
+                endpoint_type="search",
+                query=query,
+                exc=exc,
+            )
             return []
 
     async def get_artist(self, artist_id: int | str) -> Optional[Dict[str, Any]]:
@@ -69,7 +104,12 @@ class DeezerService:
         try:
             return await self._get(f"/artist/{artist_id}")
         except Exception as exc:
-            logger.error(f"Deezer get artist failed: {exc}")
+            self._log_failure(
+                source="deezer artist",
+                endpoint_type="get_artist",
+                identifier=artist_id,
+                exc=exc,
+            )
             return None
 
     async def get_artist_albums(
@@ -80,7 +120,12 @@ class DeezerService:
             payload = await self._get(f"/artist/{artist_id}/albums", {"limit": limit})
             return payload.get("data", []) or []
         except Exception as exc:
-            logger.error(f"Deezer get artist albums failed: {exc}")
+            self._log_failure(
+                source="deezer album",
+                endpoint_type="get_artist_albums",
+                identifier=artist_id,
+                exc=exc,
+            )
             return []
 
     async def get_artist_top_tracks(
@@ -91,7 +136,12 @@ class DeezerService:
             payload = await self._get(f"/artist/{artist_id}/top", {"limit": limit})
             return payload.get("data", []) or []
         except Exception as exc:
-            logger.error(f"Deezer get artist top tracks failed: {exc}")
+            self._log_failure(
+                source="deezer track",
+                endpoint_type="get_artist_top_tracks",
+                identifier=artist_id,
+                exc=exc,
+            )
             return []
 
     async def get_related_artists(
@@ -102,7 +152,12 @@ class DeezerService:
             payload = await self._get(f"/artist/{artist_id}/related", {"limit": limit})
             return payload.get("data", []) or []
         except Exception as exc:
-            logger.error(f"Deezer related artists failed: {exc}")
+            self._log_failure(
+                source="deezer artist",
+                endpoint_type="get_related_artists",
+                identifier=artist_id,
+                exc=exc,
+            )
             return []
 
 
@@ -111,7 +166,12 @@ class DeezerService:
         try:
             return await self._get(f"/playlist/{playlist_id}")
         except Exception as exc:
-            logger.error(f"Deezer get playlist failed: {exc}")
+            self._log_failure(
+                source="deezer track",
+                endpoint_type="get_playlist",
+                identifier=playlist_id,
+                exc=exc,
+            )
             return None
 
     async def get_playlist_tracks(
@@ -145,7 +205,12 @@ class DeezerService:
 
             return tracks
         except Exception as exc:
-            logger.error(f"Deezer get playlist tracks failed: {exc}")
+            self._log_failure(
+                source="deezer track",
+                endpoint_type="get_playlist_tracks",
+                identifier=playlist_id,
+                exc=exc,
+            )
             return []
 
     async def get_playlist_with_tracks(

@@ -229,91 +229,79 @@ async def _search_local_tracks(
 
 async def _search_deezer_artists(query: str, limit: int) -> List[SearchResultItem]:
     """Search Deezer for artists."""
-    try:
-        results = await deezer_service.search_artists(query, limit=limit)
-        return [
-            SearchResultItem(
-                id=f"deezer:{a['id']}",
-                type="artist",
-                name=a.get("name", ""),
-                image_url=_deezer_image_from_payload(a, "artist"),
-                source="deezer",
-                in_library=False,
-                external_ids={"deezer_id": str(a["id"])},
-            )
-            for a in results
-        ]
-    except Exception as e:
-        logger.error(f"Deezer artist search failed: {e}")
-        return []
+    results = await deezer_service.search_artists(query, limit=limit)
+    return [
+        SearchResultItem(
+            id=f"deezer:{a['id']}",
+            type="artist",
+            name=a.get("name", ""),
+            image_url=_deezer_image_from_payload(a, "artist"),
+            source="deezer",
+            in_library=False,
+            external_ids={"deezer_id": str(a["id"])},
+        )
+        for a in results
+    ]
 
 
 async def _search_deezer_albums(query: str, limit: int) -> List[SearchResultItem]:
     """Search Deezer for albums."""
-    try:
-        results = await deezer_service.search_albums(query, limit=limit)
-        return [
-            SearchResultItem(
-                id=f"deezer:{a['id']}",
-                type="album",
-                name=a.get("title", ""),
-                artist_name=a.get("artist", {}).get("name"),
-                image_url=_deezer_image_from_payload(a, "album")
-                or _deezer_image_from_payload(a.get("artist", {}), "artist"),
-                year=(
-                    int(a["release_date"][:4])
-                    if a.get("release_date") and len(a["release_date"]) >= 4
-                    else None
-                ),
-                source="deezer",
-                in_library=False,
-                external_ids={"deezer_id": str(a["id"])},
-            )
-            for a in results
-        ]
-    except Exception as e:
-        logger.error(f"Deezer album search failed: {e}")
-        return []
+    results = await deezer_service.search_albums(query, limit=limit)
+    return [
+        SearchResultItem(
+            id=f"deezer:{a['id']}",
+            type="album",
+            name=a.get("title", ""),
+            artist_name=a.get("artist", {}).get("name"),
+            image_url=_deezer_image_from_payload(a, "album")
+            or _deezer_image_from_payload(a.get("artist", {}), "artist"),
+            year=(
+                int(a["release_date"][:4])
+                if a.get("release_date") and len(a["release_date"]) >= 4
+                else None
+            ),
+            source="deezer",
+            in_library=False,
+            external_ids={"deezer_id": str(a["id"])},
+        )
+        for a in results
+    ]
 
 
 async def _search_deezer_tracks(query: str, limit: int) -> List[SearchResultItem]:
     """Search Deezer for tracks."""
-    try:
-        results = await deezer_service.search_tracks(query, limit=limit)
-        return [
-            SearchResultItem(
-                id=f"deezer:{t['id']}",
-                type="track",
-                name=t.get("title", ""),
-                artist_name=t.get("artist", {}).get("name"),
-                album_name=t.get("album", {}).get("title"),
-                image_url=_deezer_image_from_payload(t.get("album", {}), "album")
-                or _deezer_image_from_payload(t.get("artist", {}), "artist"),
-                source="deezer",
-                in_library=False,
-                external_ids={
-                    k: v
-                    for k, v in {
-                        "deezer_id": str(t["id"]),
-                        "deezer_artist_id": (
-                            str(t.get("artist", {}).get("id"))
-                            if t.get("artist", {}).get("id")
-                            else None
-                        ),
-                        "deezer_album_id": (
-                            str(t.get("album", {}).get("id"))
-                            if t.get("album", {}).get("id")
-                            else None
-                        ),
-                    }.items()
-                    if v
-                },
-            )
-            for t in results
-        ]
-    except Exception as e:
-        logger.error(f"Deezer track search failed: {e}")
-        return []
+    results = await deezer_service.search_tracks(query, limit=limit)
+    return [
+        SearchResultItem(
+            id=f"deezer:{t['id']}",
+            type="track",
+            name=t.get("title", ""),
+            artist_name=t.get("artist", {}).get("name"),
+            album_name=t.get("album", {}).get("title"),
+            image_url=_deezer_image_from_payload(t.get("album", {}), "album")
+            or _deezer_image_from_payload(t.get("artist", {}), "artist"),
+            source="deezer",
+            in_library=False,
+            external_ids={
+                k: v
+                for k, v in {
+                    "deezer_id": str(t["id"]),
+                    "deezer_artist_id": (
+                        str(t.get("artist", {}).get("id"))
+                        if t.get("artist", {}).get("id")
+                        else None
+                    ),
+                    "deezer_album_id": (
+                        str(t.get("album", {}).get("id"))
+                        if t.get("album", {}).get("id")
+                        else None
+                    ),
+                }.items()
+                if v
+            },
+        )
+        for t in results
+    ]
 
 
 async def _search_ytmusic_artists(query: str, limit: int) -> List[SearchResultItem]:
@@ -567,7 +555,14 @@ async def search(
 
     for name, result in [*local_results, *zip(remote_task_names, remote_results)]:
         if isinstance(result, Exception):
-            logger.error(f"Search task {name} failed: {result}")
+            logger.error(
+                "Search task failed | task=%s | source=%s | query=%r | exc_type=%s | exc=%r",
+                name,
+                "deezer" if name.startswith("deezer_") else name.split("_")[0],
+                q,
+                type(result).__name__,
+                result,
+            )
             continue
 
         if "artists" in name:
