@@ -3,12 +3,23 @@
 from typing import Optional, List, Dict, Any
 import logging
 import asyncio
+import re
 
 import httpx
 
 from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
+
+
+CONNECTOR_PATTERN = re.compile(r"\s*(?:&|\+|\band\b)\s*", re.IGNORECASE)
+PUNCTUATION_PATTERN = re.compile(r"[^a-z0-9\s]")
+WHITESPACE_PATTERN = re.compile(r"\s+")
+EDITION_SUFFIX_PATTERN = re.compile(
+    r"\b(?:deluxe|expanded|anniversary|collector'?s?|special|super\s+deluxe|"
+    r"remaster(?:ed)?|reissue|bonus\s+track(?:s)?|edition)\b",
+    re.IGNORECASE,
+)
 
 
 class ProwlarrService:
@@ -183,8 +194,11 @@ class ProwlarrService:
             result["score"] = score
             scored_results.append(result)
 
-        # Sort by score descending
-        scored_results.sort(key=lambda x: x["score"], reverse=True)
+        # Relevance gate: only sufficiently relevant title matches can rank first.
+        scored_results.sort(
+            key=lambda x: (x.get("passes_text_relevance", False), x["score"]),
+            reverse=True,
+        )
 
         return scored_results
 
@@ -279,15 +293,34 @@ class ProwlarrService:
         Higher score = better match.
         """
         score = 0.0
-        title = result.get("title", "").lower()
-        artist_lower = artist.lower()
-        album_lower = album.lower()
+        title = result.get("title", "")
 
-        # Title matching (max 50 points)
-        if artist_lower in title:
-            score += 25
-        if album_lower in title:
-            score += 25
+        title_tokens = self._tokenize_for_match(title)
+        artist_tokens = self._tokenize_for_match(artist)
+        album_tokens = self._tokenize_for_match(album)
+        query_tokens = artist_tokens | album_tokens
+
+        overlap = len(query_tokens & title_tokens)
+        overlap_ratio = overlap / len(query_tokens) if query_tokens else 0.0
+        artist_coverage = (
+            len(artist_tokens & title_tokens) / len(artist_tokens) if artist_tokens else 0.0
+        )
+        album_coverage = (
+            len(album_tokens & title_tokens) / len(album_tokens) if album_tokens else 0.0
+        )
+        result["text_relevance"] = round(overlap_ratio, 3)
+        result["passes_text_relevance"] = overlap_ratio >= self._min_text_relevance_threshold()
+
+        # Textual matching by weighted token coverage (max 50 points)
+        score += min(50.0, (artist_coverage * 24) + (album_coverage * 26))
+
+        # Penalize low-overlap matches so near-misses are not over-forgiven.
+        if overlap_ratio < 0.55:
+            score -= (0.55 - overlap_ratio) * 50
+        if artist_coverage < 0.45:
+            score -= (0.45 - artist_coverage) * 35
+        if album_coverage < 0.45:
+            score -= (0.45 - album_coverage) * 35
 
         # Format preference (max 30 points)
         quality = result.get("quality")
@@ -328,7 +361,28 @@ class ProwlarrService:
         if 50 < size_mb < 2000:  # Reasonable album size
             score += 5
 
-        return score
+        return max(score, 0.0)
+
+    def _normalize_title_for_match(self, value: str) -> str:
+        """Normalize title text into a canonical comparison form."""
+        value = value.lower()
+        value = CONNECTOR_PATTERN.sub(" and ", value)
+        value = PUNCTUATION_PATTERN.sub(" ", value)
+        value = EDITION_SUFFIX_PATTERN.sub(" ", value)
+        value = WHITESPACE_PATTERN.sub(" ", value).strip()
+        return value
+
+    def _tokenize_for_match(self, value: str) -> set[str]:
+        """Tokenize normalized value for overlap scoring."""
+        normalized = self._normalize_title_for_match(value)
+        if not normalized:
+            return set()
+        return {token for token in normalized.split(" ") if token}
+
+    def _min_text_relevance_threshold(self) -> float:
+        """Return minimum token-overlap score required for a result to rank first."""
+        threshold = cfg.get_float("prowlarr_min_title_match_score", 0.6)
+        return min(max(threshold, 0.0), 1.0)
 
 
 # Singleton instance
