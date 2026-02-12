@@ -14,17 +14,19 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import toast from 'react-hot-toast'
+import { useBackendReadiness } from '@/lib/useBackendReadiness'
 
 export default function GenreExplorePage() {
   const params = useParams()
   const genre = decodeURIComponent(params.genre as string)
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
   const [broadenLanguage, setBroadenLanguage] = useState(false)
+  const { backendReady } = useBackendReadiness()
 
   const { data, isLoading } = useQuery({
     queryKey: ['discovery', 'genre', genre, broadenLanguage],
     queryFn: () => discoveryApi.getGenre(genre, undefined, broadenLanguage),
-    enabled: !!genre,
+    enabled: !!genre && backendReady,
   })
 
   const result = data?.data
@@ -99,9 +101,10 @@ export default function GenreExplorePage() {
         </div>
       )}
 
-      {isLoading ? (
+      {!backendReady || isLoading ? (
         <div className="flex items-center justify-center py-16">
           <LoadingSpinner size="lg" />
+          {!backendReady && <span className="ml-3 text-sm text-surface-400">Starting up discovery services...</span>}
         </div>
       ) : artists.length === 0 && albums.length === 0 ? (
         <EmptyState

@@ -220,10 +220,14 @@ export interface Download {
   progress: number
   download_speed?: number
   eta_seconds?: number
+  download_client?: string
+  download_id?: string
+  download_path?: string
   source: string
   beets_imported: boolean
   final_path?: string
   created_at: string
+  updated_at: string
   started_at?: string
   completed_at?: string
 }
