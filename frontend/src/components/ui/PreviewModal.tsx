@@ -14,7 +14,7 @@ import {
   Music,
   Disc,
 } from 'lucide-react'
-import { searchApi, wishlistApi } from '@/lib/api'
+import { searchApi } from '@/lib/api'
 import type { PreviewData, SearchResult } from '@/lib/api'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { formatNumber, getInitials } from '@/lib/utils'
@@ -26,9 +26,14 @@ interface PreviewModalProps {
 }
 
 export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
+  const [activeItem, setActiveItem] = useState<SearchResult | null>(item)
   const [headerImageFailed, setHeaderImageFailed] = useState(false)
   const [avatarImageFailed, setAvatarImageFailed] = useState(false)
   const [topAlbumImageFailures, setTopAlbumImageFailures] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    setActiveItem(item)
+  }, [item])
 
   // Close on Escape key
   useEffect(() => {
@@ -41,26 +46,26 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
 
   // Prevent body scroll when modal is open
   useEffect(() => {
-    if (item) {
+    if (activeItem) {
       document.body.style.overflow = 'hidden'
     }
     return () => {
       document.body.style.overflow = ''
     }
-  }, [item])
+  }, [activeItem])
 
   const { data: previewData, isLoading } = useQuery({
-    queryKey: ['preview', item?.type, item?.name, item?.artist_name, item?.source],
+    queryKey: ['preview', activeItem?.type, activeItem?.name, activeItem?.artist_name, activeItem?.source],
     queryFn: () => {
-      if (!item) return null
+      if (!activeItem) return null
       return searchApi.preview(
-        item.type,
-        item.name,
-        item.artist_name,
-        item.source
+        activeItem.type,
+        activeItem.name,
+        activeItem.artist_name,
+        activeItem.source
       )
     },
-    enabled: !!item,
+    enabled: !!activeItem,
   })
 
   const preview: PreviewData | undefined = previewData?.data
@@ -69,12 +74,42 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
     setHeaderImageFailed(false)
     setAvatarImageFailed(false)
     setTopAlbumImageFailures({})
-  }, [item?.id, preview?.image_url, preview?.top_albums])
+  }, [activeItem?.id, preview?.image_url, preview?.top_albums])
 
-  if (!item) return null
+  if (!activeItem) return null
 
-  const normalizedPreviewImageUrl = (item.image_url || preview?.image_url || '').replace(/^http:\/\//i, 'https://')
+  const normalizedPreviewImageUrl = (activeItem.image_url || preview?.image_url || '').replace(/^http:\/\//i, 'https://')
   const isPreviewExternalImage = /^https?:\/\//i.test(normalizedPreviewImageUrl)
+
+  const buildAlbumPreviewItem = (album: PreviewData['top_albums'][number], index: number): SearchResult => {
+    const sourceAlbumId = album.source_album_id || album.source_provider_id || `${album.title}-${index}`
+    const artistName = album.artist_name || (activeItem.type === 'artist' ? activeItem.name : activeItem.artist_name)
+    const externalIds: Record<string, string> = {}
+
+    if (activeItem.source === 'deezer' && album.source_provider_id) {
+      externalIds.deezer_id = album.source_provider_id
+    }
+    if (activeItem.source === 'ytmusic' && album.source_provider_id) {
+      externalIds.ytmusic_browse_id = album.source_provider_id
+    }
+    if (activeItem.source === 'lastfm') {
+      externalIds.lastfm_album_ref = album.source_provider_id || `${artistName || 'unknown'}:${album.title}`
+    }
+    if (activeItem.source === 'local' && album.source_provider_id) {
+      externalIds.local_album_id = album.source_provider_id
+    }
+
+    return {
+      id: `${activeItem.source}:${sourceAlbumId}`,
+      type: 'album',
+      name: album.title,
+      artist_name: artistName,
+      image_url: album.image_url || preview?.image_url || activeItem.image_url,
+      source: activeItem.source,
+      in_library: false,
+      external_ids: externalIds,
+    }
+  }
 
   return (
     <div
@@ -91,7 +126,6 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
       >
         {/* Header with image */}
         <div className="relative">
-          {/* Background blur image */}
           {normalizedPreviewImageUrl && !headerImageFailed && (
             <div className="absolute inset-0 overflow-hidden">
               <Image
@@ -106,12 +140,11 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
           )}
 
           <div className="relative p-6 flex gap-5">
-            {/* Image / Avatar */}
-            <div className={`flex-shrink-0 ${item.type === 'artist' ? 'w-28 h-28 rounded-full' : 'w-28 h-28 rounded-lg'} overflow-hidden bg-surface-800`}>
+            <div className={`flex-shrink-0 ${activeItem.type === 'artist' ? 'w-28 h-28 rounded-full' : 'w-28 h-28 rounded-lg'} overflow-hidden bg-surface-800`}>
               {normalizedPreviewImageUrl && !avatarImageFailed ? (
                 <Image
                   src={normalizedPreviewImageUrl}
-                  alt={item.name}
+                  alt={activeItem.name}
                   width={112}
                   height={112}
                   className="w-full h-full object-cover"
@@ -120,29 +153,23 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-surface-500">
-                  {item.type === 'artist' ? (
-                    getInitials(item.name)
-                  ) : (
-                    <Music className="w-10 h-10" />
-                  )}
+                  {activeItem.type === 'artist' ? getInitials(activeItem.name) : <Music className="w-10 h-10" />}
                 </div>
               )}
             </div>
 
-            {/* Basic info */}
             <div className="flex-1 min-w-0 flex flex-col justify-center">
               <span className="text-xs font-medium text-primary-400 uppercase tracking-wider mb-1">
-                {item.type} {item.source !== 'local' && `\u00b7 ${item.source === 'deezer' ? 'Deezer' : item.source === 'ytmusic' ? 'YouTube Music' : item.source}`}
+                {activeItem.type} {activeItem.source !== 'local' && `\u00b7 ${activeItem.source === 'deezer' ? 'Deezer' : activeItem.source === 'ytmusic' ? 'YouTube Music' : activeItem.source}`}
               </span>
-              <h2 className="text-xl font-bold text-white line-clamp-2">{item.name}</h2>
-              {item.artist_name && (
-                <p className="text-sm text-surface-300 mt-1">{item.artist_name}</p>
+              <h2 className="text-xl font-bold text-white line-clamp-2">{activeItem.name}</h2>
+              {activeItem.artist_name && (
+                <p className="text-sm text-surface-300 mt-1">{activeItem.artist_name}</p>
               )}
-              {item.year && (
-                <p className="text-sm text-surface-400 mt-0.5">{item.year}</p>
+              {activeItem.year && (
+                <p className="text-sm text-surface-400 mt-0.5">{activeItem.year}</p>
               )}
 
-              {/* Stats */}
               {preview && (preview.listeners || preview.playcount) && (
                 <div className="flex items-center gap-4 mt-3">
                   {preview.listeners && (
@@ -161,7 +188,6 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
               )}
             </div>
 
-            {/* Close button */}
             <button
               onClick={onClose}
               className="absolute top-4 right-4 p-2 text-surface-400 hover:text-white hover:bg-surface-700 rounded-lg transition-colors"
@@ -171,7 +197,6 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
           </div>
         </div>
 
-        {/* Content */}
         <div className="px-6 pb-6 overflow-y-auto max-h-[calc(85vh-200px)]">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
@@ -179,7 +204,6 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
             </div>
           ) : (
             <div className="space-y-5">
-              {/* Bio */}
               {preview?.bio && (
                 <div>
                   <p
@@ -189,7 +213,6 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                 </div>
               )}
 
-              {/* Tags */}
               {preview?.tags && preview.tags.length > 0 && (
                 <div>
                   <div className="flex items-center gap-2 mb-2">
@@ -209,7 +232,6 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                 </div>
               )}
 
-              {/* Top Albums (for artist preview) */}
               {preview?.top_albums && preview.top_albums.length > 0 && (
                 <div>
                   <div className="flex items-center gap-2 mb-3">
@@ -218,14 +240,20 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     {preview.top_albums.map((album, i) => {
-                      const albumKey = `${album.title}-${i}`
+                      const albumKey = `${album.source_album_id || album.title}-${i}`
                       const normalizedAlbumImageUrl = (album.image_url || '').replace(/^http:\/\//i, 'https://')
                       const isExternalAlbumImage = /^https?:\/\//i.test(normalizedAlbumImageUrl)
                       const albumImageFailed = !!topAlbumImageFailures[albumKey]
 
                       return (
-                        <div key={albumKey} className="flex flex-col gap-1.5">
-                          <div className="aspect-square rounded-lg overflow-hidden bg-surface-800">
+                        <button
+                          key={albumKey}
+                          type="button"
+                          onClick={() => setActiveItem(buildAlbumPreviewItem(album, i))}
+                          className="flex flex-col gap-1.5 text-left group"
+                          title={`Preview ${album.title}`}
+                        >
+                          <div className="aspect-square rounded-lg overflow-hidden bg-surface-800 ring-1 ring-transparent group-hover:ring-primary-500 transition-colors">
                             {normalizedAlbumImageUrl && !albumImageFailed ? (
                               <Image
                                 src={normalizedAlbumImageUrl}
@@ -235,42 +263,37 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                                 className="w-full h-full object-cover"
                                 unoptimized={isExternalAlbumImage}
                                 onError={() => setTopAlbumImageFailures((prev) => ({ ...prev, [albumKey]: true }))}
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-surface-600">
-                              <Music className="w-8 h-8" />
-                            </div>
-                          )}
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs text-surface-300 line-clamp-1">{album.title}</span>
-                            {!item.in_library && (
-                              <button
-                                onClick={() => onAdd({
-                                id: `preview-album-${item.name}-${album.title}`,
-                                type: 'album',
-                                name: album.title,
-                                artist_name: item.name,
-                                image_url: album.image_url,
-                                source: item.source,
-                                in_library: false,
-                                external_ids: {},
-                              } as SearchResult)}
-                                className="p-1 text-surface-400 hover:text-white hover:bg-surface-700 rounded"
-                                title="Add album"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-surface-600">
+                                <Music className="w-8 h-8" />
+                              </div>
                             )}
                           </div>
-                        </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-surface-300 line-clamp-1 group-hover:text-white transition-colors">{album.title}</span>
+                            {!activeItem.in_library && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  onAdd(buildAlbumPreviewItem(album, i))
+                                }}
+                                className="p-1 text-surface-400 group-hover:text-white hover:bg-surface-700 rounded"
+                                title="Add album"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </button>
                       )
                     })}
                   </div>
                 </div>
               )}
 
-              {/* Track list (for album preview) */}
               {preview?.tracks && preview.tracks.length > 0 && (
                 <div>
                   <div className="flex items-center gap-2 mb-2">
@@ -294,16 +317,16 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                             {Math.floor(track.duration / 60000)}:{String(Math.floor((track.duration % 60000) / 1000)).padStart(2, '0')}
                           </span>
                         )}
-                        {!item.in_library && (
+                        {!activeItem.in_library && (
                           <button
                             onClick={() => onAdd({
-                              id: `preview-track-${item.name}-${track.title}`,
+                              id: `preview-track-${activeItem.name}-${track.title}`,
                               type: 'track',
                               name: track.title,
-                              artist_name: item.type === 'artist' ? item.name : item.artist_name,
-                              album_name: item.type === 'album' ? item.name : undefined,
-                              image_url: item.image_url || preview?.image_url,
-                              source: item.source,
+                              artist_name: activeItem.type === 'artist' ? activeItem.name : activeItem.artist_name,
+                              album_name: activeItem.type === 'album' ? activeItem.name : undefined,
+                              image_url: activeItem.image_url || preview?.image_url,
+                              source: activeItem.source,
                               in_library: false,
                               external_ids: {},
                             } as SearchResult)}
@@ -322,7 +345,6 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
           )}
         </div>
 
-        {/* Footer actions */}
         <div className="border-t border-surface-700 px-6 py-4 flex items-center justify-between bg-surface-900">
           <div className="flex items-center gap-2">
             {preview?.url && (
@@ -333,7 +355,7 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
                 className="flex items-center gap-1.5 px-3 py-2 text-sm text-surface-400 hover:text-white transition-colors"
               >
                 <ExternalLink className="w-4 h-4" />
-                View on {item.source === 'lastfm' ? 'Last.fm' : item.source}
+                View on {activeItem.source === 'lastfm' ? 'Last.fm' : activeItem.source}
               </a>
             )}
           </div>
@@ -344,7 +366,7 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
             >
               Close
             </button>
-            {item.in_library ? (
+            {activeItem.in_library ? (
               <button
                 disabled
                 className="flex items-center gap-2 px-4 py-2 bg-green-500/20 text-green-400 rounded-lg text-sm font-medium"
@@ -354,7 +376,7 @@ export function PreviewModal({ item, onClose, onAdd }: PreviewModalProps) {
               </button>
             ) : (
               <button
-                onClick={() => onAdd(item)}
+                onClick={() => onAdd(activeItem)}
                 className="flex items-center gap-2 px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm font-medium transition-colors"
               >
                 <Plus className="w-4 h-4" />
