@@ -4,12 +4,13 @@ from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.album import Album
 from app.models.artist import Artist
+from app.models.download import Download
 from app.models.wishlist import WishlistItem, WishlistStatus, WishlistPriority
 from app.services.prowlarr import prowlarr_service
 
@@ -216,6 +217,12 @@ async def delete_wishlist_item(
 
     if not item:
         raise HTTPException(status_code=404, detail="Wishlist item not found")
+
+    await db.execute(
+        update(Download)
+        .where(Download.wishlist_id == item_id)
+        .values(wishlist_id=None)
+    )
 
     await db.delete(item)
     await db.commit()
