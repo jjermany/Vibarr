@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 
 from app.models.download import DownloadStatus
@@ -394,3 +395,109 @@ async def test_grab_or_import_failures_mark_wishlist_failed(monkeypatch):
     assert download.status == DownloadStatus.FAILED
     assert wishlist.status == WishlistStatus.FAILED
     assert "Beets import failed" in (wishlist.notes or "")
+
+
+def _new_value_coro(value):
+    async def _inner():
+        return value
+
+    return _inner()
+
+
+def test_run_async_reuses_persistent_worker_loop(monkeypatch):
+    class _FakeLoop:
+        def __init__(self):
+            self.closed = False
+            self.run_calls = 0
+
+        def is_closed(self):
+            return self.closed
+
+        def run_until_complete(self, coro):
+            self.run_calls += 1
+            return asyncio.run(coro)
+
+        def close(self):
+            self.closed = True
+
+    created_loops = []
+
+    def _make_loop():
+        loop = _FakeLoop()
+        created_loops.append(loop)
+        return loop
+
+    monkeypatch.setattr(downloads.asyncio, "new_event_loop", _make_loop)
+    monkeypatch.setattr(downloads.asyncio, "set_event_loop", lambda loop: None)
+    monkeypatch.setattr(downloads, "_task_loop", None)
+
+    assert downloads._run_async(_new_value_coro(1)) == 1
+    assert downloads._run_async(_new_value_coro(2)) == 2
+
+    assert len(created_loops) == 1
+    assert created_loops[0].run_calls == 2
+    assert created_loops[0].closed is False
+
+
+def test_run_async_recreates_closed_loop(monkeypatch):
+    class _FakeClosedLoop:
+        def is_closed(self):
+            return True
+
+    class _FakeLoop:
+        def __init__(self):
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def run_until_complete(self, coro):
+            return asyncio.run(coro)
+
+        def close(self):
+            self.closed = True
+
+    created_loops = []
+
+    def _make_loop():
+        loop = _FakeLoop()
+        created_loops.append(loop)
+        return loop
+
+    monkeypatch.setattr(downloads.asyncio, "new_event_loop", _make_loop)
+    monkeypatch.setattr(downloads.asyncio, "set_event_loop", lambda loop: None)
+    monkeypatch.setattr(downloads, "_task_loop", _FakeClosedLoop())
+
+    assert downloads._run_async(_new_value_coro(42)) == 42
+    assert len(created_loops) == 1
+
+
+def test_shutdown_task_loop_closes_resources(monkeypatch):
+    events = []
+
+    class _FakeLoop:
+        def __init__(self):
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def run_until_complete(self, coro):
+            return asyncio.run(coro)
+
+        def close(self):
+            self.closed = True
+            events.append("loop_closed")
+
+    async def _fake_close():
+        events.append("resources_closed")
+
+    fake_loop = _FakeLoop()
+    monkeypatch.setattr(downloads, "_task_loop", fake_loop)
+    monkeypatch.setattr(downloads, "_close_task_resources", _fake_close)
+
+    downloads._shutdown_task_loop()
+
+    assert events == ["resources_closed", "loop_closed"]
+    assert fake_loop.closed is True
+    assert downloads._task_loop is None
