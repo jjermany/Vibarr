@@ -64,7 +64,7 @@ class YTMusicService:
 
 
     async def get_playlist(
-        self, playlist_id: str, limit: int = 100
+        self, playlist_id: str, limit: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:
         """Get YouTube Music playlist metadata and tracks."""
         if not self.client:
