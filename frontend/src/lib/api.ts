@@ -170,6 +170,10 @@ export interface WishlistItem {
   source: string
   confidence_score?: number
   image_url?: string
+  status_message?: string
+  last_searched_at?: string
+  search_count?: number
+  updated_at?: string
   auto_download: boolean
   created_at: string
 }
