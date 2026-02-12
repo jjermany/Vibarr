@@ -468,3 +468,147 @@ async def test_delete_found_wishlist_item_detaches_related_downloads():
     assert linked_download.wishlist_id is None
     assert unlinked_download.wishlist_id == 999
     assert fake_db.commit_count == 1
+
+
+class _FakeBulkWishlistDb:
+    def __init__(self, items, downloads=None):
+        self.items = {item.id: item for item in items}
+        self.downloads = downloads or []
+        self.commit_count = 0
+
+    async def execute(self, query):
+        if isinstance(query, Update):
+            where_value = query.whereclause.right.value
+            for download in self.downloads:
+                if download.wishlist_id == where_value:
+                    download.wishlist_id = None
+            return None
+
+        entity = query.column_descriptions[0].get("entity")
+        if entity is WishlistItem:
+            where = query.whereclause
+            if where is None:
+                return _ScalarsListResult(list(self.items.values()))
+
+            operator_name = where.operator.__name__
+            if operator_name == "in_op":
+                values = where.right.value
+                return _ScalarsListResult([self.items[item_id] for item_id in values if item_id in self.items])
+            if operator_name == "eq":
+                value = where.right.value
+                if isinstance(value, WishlistStatus):
+                    return _ScalarsListResult([item for item in self.items.values() if item.status == value])
+                return _ScalarResult(self.items.get(value))
+
+        return _ScalarsListResult([])
+
+    async def delete(self, model):
+        self.items.pop(model.id, None)
+
+    async def commit(self):
+        self.commit_count += 1
+
+
+@pytest.mark.asyncio
+async def test_search_selected_wishlist_mixed_results(monkeypatch):
+    wanted = WishlistItem(id=10, item_type="album", status=WishlistStatus.WANTED)
+    found = WishlistItem(id=11, item_type="album", status=WishlistStatus.FOUND)
+    fake_db = _FakeBulkWishlistDb([wanted, found])
+    queued_ids = []
+
+    async def override_get_db():
+        yield fake_db
+
+    def fake_delay(item_id):
+        queued_ids.append(item_id)
+
+    monkeypatch.setattr(wishlist_router, "prowlarr_service", type("_Svc", (), {"is_available": True})())
+    monkeypatch.setattr(downloads.search_wishlist_item, "delay", fake_delay)
+
+    app = FastAPI()
+    app.include_router(wishlist_router.router, prefix="/api/wishlist")
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.post("/api/wishlist/search-selected", json={"item_ids": [10, 11, 999]})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "requested": 3,
+        "queued": 1,
+        "skipped": 1,
+        "failed": 1,
+        "queued_ids": [10],
+        "skipped_ids": [11],
+        "failed_ids": [999],
+    }
+    assert queued_ids == [10]
+    assert wanted.status == WishlistStatus.SEARCHING
+    assert fake_db.commit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_selected_returns_counts_and_cleans_download_refs():
+    item_one = WishlistItem(id=21, item_type="album", status=WishlistStatus.WANTED)
+    item_two = WishlistItem(id=22, item_type="artist", status=WishlistStatus.FOUND)
+    linked_download = Download(id=300, wishlist_id=21, artist_name="Artist", album_title="Album")
+    fake_db = _FakeBulkWishlistDb([item_one, item_two], downloads=[linked_download])
+
+    async def override_get_db():
+        yield fake_db
+
+    app = FastAPI()
+    app.include_router(wishlist_router.router, prefix="/api/wishlist")
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.request(
+            "DELETE",
+            "/api/wishlist/bulk",
+            json={"item_ids": [21, 404]},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "requested": 2,
+        "deleted": 1,
+        "skipped": 0,
+        "failed": 1,
+        "deleted_ids": [21],
+        "skipped_ids": [],
+        "failed_ids": [404],
+    }
+    assert linked_download.wishlist_id is None
+    assert fake_db.commit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_all_with_status_filter():
+    wanted = WishlistItem(id=31, item_type="album", status=WishlistStatus.WANTED)
+    found = WishlistItem(id=32, item_type="album", status=WishlistStatus.FOUND)
+    fake_db = _FakeBulkWishlistDb([wanted, found])
+
+    async def override_get_db():
+        yield fake_db
+
+    app = FastAPI()
+    app.include_router(wishlist_router.router, prefix="/api/wishlist")
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.request(
+            "DELETE",
+            "/api/wishlist/bulk",
+            json={"all": True, "status": "wanted"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["deleted_ids"] == [31]
+    assert 31 not in fake_db.items
+    assert 32 in fake_db.items

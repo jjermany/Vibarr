@@ -21,6 +21,7 @@ import { LoadingPage } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { cn, formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
+import { canSearchItem, getSearchableSelectedIds, getVisibleSelectionState } from './selection'
 
 type FilterStatus = 'all' | 'wanted' | 'searching' | 'found' | 'downloading' | 'downloaded' | 'failed'
 
@@ -34,6 +35,7 @@ const CTA_BY_STATUS: Partial<Record<string, { filter: FilterStatus; label: strin
 
 export default function WishlistPage() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const queryClient = useQueryClient()
   const previousStatuses = useRef<Record<number, string>>({})
   const manualSearchItems = useRef<Record<number, string>>({})
@@ -55,21 +57,56 @@ export default function WishlistPage() {
     },
   })
 
+  const refreshWishlistQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['wishlist', 'filtered'] }),
+      queryClient.invalidateQueries({ queryKey: ['wishlist', 'status-feed'] }),
+      queryClient.refetchQueries({ queryKey: ['wishlist', 'filtered'] }),
+      queryClient.refetchQueries({ queryKey: ['wishlist', 'status-feed'] }),
+    ])
+  }
+
   const deleteMutation = useMutation({
     mutationFn: (id: number) => wishlistApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['wishlist'] })
+    onSuccess: async () => {
+      await refreshWishlistQueries()
       toast.success('Item removed from wishlist')
+    },
+  })
+
+  const deleteSelectedMutation = useMutation({
+    mutationFn: (ids: number[]) => wishlistApi.deleteSelected(ids),
+    onSuccess: async (response) => {
+      const result = response.data
+      await refreshWishlistQueries()
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        for (const id of result.deleted_ids || []) {
+          next.delete(id)
+        }
+        return next
+      })
+      toast.success(`Deleted ${result.deleted} selected item${result.deleted === 1 ? '' : 's'}`)
+      if (result.failed > 0) {
+        toast.error(`${result.failed} selected item${result.failed === 1 ? '' : 's'} failed to delete`)
+      }
+    },
+  })
+
+  const deleteAllMutation = useMutation({
+    mutationFn: () => wishlistApi.deleteAll(filterStatus !== 'all' ? filterStatus : undefined),
+    onSuccess: async (response) => {
+      const result = response.data
+      await refreshWishlistQueries()
+      setSelectedIds(new Set())
+      toast.success(`Deleted ${result.deleted} item${result.deleted === 1 ? '' : 's'}`)
     },
   })
 
   const searchMutation = useMutation({
     mutationFn: (id: number) => wishlistApi.search(id),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: ['wishlist', 'filtered'] }),
-        queryClient.refetchQueries({ queryKey: ['wishlist', 'status-feed'] }),
-      ])
+      await refreshWishlistQueries()
     },
     onError: (error: any) => {
       const detail = error?.response?.data?.detail
@@ -80,10 +117,26 @@ export default function WishlistPage() {
   const searchAllMutation = useMutation({
     mutationFn: () => wishlistApi.searchAll(),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: ['wishlist', 'filtered'] }),
-        queryClient.refetchQueries({ queryKey: ['wishlist', 'status-feed'] }),
-      ])
+      await refreshWishlistQueries()
+    },
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail
+      toast.error(detail || 'Bulk search unavailable. Check indexer settings and try again.')
+    }
+  })
+
+  const searchSelectedMutation = useMutation({
+    mutationFn: (ids: number[]) => wishlistApi.searchSelected(ids),
+    onSuccess: async (response) => {
+      const result = response.data
+      await refreshWishlistQueries()
+      toast.success(`Queued ${result.queued} selected item${result.queued === 1 ? '' : 's'} for search`)
+      if (result.skipped > 0) {
+        toast(`${result.skipped} selected item${result.skipped === 1 ? '' : 's'} were skipped`, { icon: 'ℹ️' })
+      }
+      if (result.failed > 0) {
+        toast.error(`${result.failed} selected item${result.failed === 1 ? '' : 's'} failed`)
+      }
     },
     onError: (error: any) => {
       const detail = error?.response?.data?.detail
@@ -105,6 +158,19 @@ export default function WishlistPage() {
 
     return fallbackFilteredItems
   }, [fallbackFilteredItems, filterStatus, statusFeedItems])
+
+  useEffect(() => {
+    setSelectedIds((current) => {
+      const visibleIds = new Set(items.map((item) => item.id))
+      const next = new Set<number>()
+      for (const id of current) {
+        if (visibleIds.has(id)) {
+          next.add(id)
+        }
+      }
+      return next
+    })
+  }, [items])
 
   const isLoading = isFilteredLoading && statusFeedItems.length === 0
 
@@ -166,6 +232,55 @@ export default function WishlistPage() {
     searchMutation.mutate(item.id)
   }
 
+  const selectionState = getVisibleSelectionState(items, selectedIds)
+  const searchableSelectedIds = getSearchableSelectedIds(items, selectedIds)
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (selectionState.allVisibleSelected) {
+        for (const item of items) {
+          next.delete(item.id)
+        }
+      } else {
+        for (const item of items) {
+          next.add(item.id)
+        }
+      }
+      return next
+    })
+  }
+
+  const toggleSelection = (itemId: number) => {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(itemId)) {
+        next.delete(itemId)
+      } else {
+        next.add(itemId)
+      }
+      return next
+    })
+  }
+
+  const confirmDeleteSelected = () => {
+    if (selectedIds.size === 0) {
+      return
+    }
+    if (!window.confirm(`Delete ${selectedIds.size} selected wishlist item(s)? This cannot be undone.`)) {
+      return
+    }
+    deleteSelectedMutation.mutate(Array.from(selectedIds))
+  }
+
+  const confirmDeleteAll = () => {
+    const contextLabel = filterStatus === 'all' ? 'all wishlist items' : `${filterStatus} wishlist items`
+    if (!window.confirm(`Delete ${contextLabel}? This cannot be undone.`)) {
+      return
+    }
+    deleteAllMutation.mutate()
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -220,6 +335,51 @@ export default function WishlistPage() {
         </div>
       )}
 
+      {items.length > 0 && (
+        <div className="rounded-lg border border-surface-800 bg-surface-900 p-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 text-sm text-surface-300">
+              <input
+                type="checkbox"
+                checked={selectionState.allVisibleSelected}
+                ref={(el) => {
+                  if (el) {
+                    el.indeterminate = selectionState.someVisibleSelected
+                  }
+                }}
+                onChange={toggleSelectAllVisible}
+              />
+              Select all visible
+            </label>
+            <span className="text-xs text-surface-400">{selectionState.selectedVisibleCount} selected</span>
+            <button
+              className="btn-secondary"
+              disabled={searchSelectedMutation.isPending || searchableSelectedIds.length === 0}
+              onClick={() => searchSelectedMutation.mutate(searchableSelectedIds)}
+            >
+              <Search className="w-4 h-4" />
+              Search Selected
+            </button>
+            <button
+              className="btn-secondary"
+              disabled={deleteSelectedMutation.isPending || selectedIds.size === 0}
+              onClick={confirmDeleteSelected}
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete Selected
+            </button>
+            <button
+              className="btn-secondary text-red-400"
+              disabled={deleteAllMutation.isPending || items.length === 0}
+              onClick={confirmDeleteAll}
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete All
+            </button>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <LoadingPage message="Loading wishlist..." />
       ) : items.length > 0 ? (
@@ -228,6 +388,8 @@ export default function WishlistPage() {
             <WishlistItemRow
               key={item.id}
               item={item}
+              isSelected={selectedIds.has(item.id)}
+              onToggleSelected={() => toggleSelection(item.id)}
               onSearch={() => handleSearch(item)}
               onDelete={() => deleteMutation.mutate(item.id)}
             />
@@ -290,10 +452,14 @@ function getLastActionText(item: WishlistItem): string | null {
 
 function WishlistItemRow({
   item,
+  isSelected,
+  onToggleSelected,
   onSearch,
   onDelete,
 }: {
   item: WishlistItem
+  isSelected: boolean
+  onToggleSelected: () => void
   onSearch: () => void
   onDelete: () => void
 }) {
@@ -305,6 +471,7 @@ function WishlistItemRow({
   return (
     <div className="flex items-center justify-between p-4 hover:bg-surface-800/50 transition-colors">
       <div className="flex items-center gap-4 min-w-0 flex-1">
+        <input type="checkbox" checked={isSelected} onChange={onToggleSelected} aria-label={`Select wishlist item ${item.id}`} />
         <div className="w-12 h-12 bg-surface-700 rounded flex-shrink-0 flex items-center justify-center text-surface-500 overflow-hidden">
           {normalizedImageUrl && !imageFailed ? (
             <Image
@@ -348,7 +515,7 @@ function WishlistItemRow({
       </div>
 
       <div className="flex items-center gap-2">
-        {item.status === 'wanted' && (
+        {canSearchItem(item) && (
           <button onClick={onSearch} className="btn-ghost p-2" title="Search">
             <Search className="w-4 h-4" />
           </button>
@@ -372,7 +539,8 @@ function WishlistItemRow({
                     onSearch()
                     setShowMenu(false)
                   }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-surface-700 transition-colors flex items-center gap-2"
+                  disabled={!canSearchItem(item)}
+                  className="w-full px-4 py-2 text-left text-sm hover:bg-surface-700 transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   <Search className="w-4 h-4" />
                   Search Now

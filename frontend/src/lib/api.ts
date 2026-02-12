@@ -708,8 +708,11 @@ export const wishlistApi = {
   update: (id: number, data: Partial<WishlistItem>) =>
     api.patch<WishlistItem>(`/api/wishlist/${id}`, data),
   delete: (id: number) => api.delete(`/api/wishlist/${id}`),
+  deleteSelected: (item_ids: number[]) => api.delete('/api/wishlist/bulk', { data: { item_ids } }),
+  deleteAll: (status?: string) => api.delete('/api/wishlist/bulk', { data: { all: true, status } }),
   search: (id: number) => api.post(`/api/wishlist/${id}/search`),
   searchAll: () => api.post('/api/wishlist/search-all'),
+  searchSelected: (item_ids: number[]) => api.post('/api/wishlist/search-selected', { item_ids }),
 }
 
 export const downloadsApi = {
