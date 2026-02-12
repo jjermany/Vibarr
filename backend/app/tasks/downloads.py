@@ -195,11 +195,57 @@ async def _search_wishlist_item_async(item_id: int):
             )
 
             if results:
+                best_result = results[0]  # Already sorted by score
+
                 item.status = WishlistStatus.FOUND
+                # Create download entry for the best result
+                download = Download(
+                    wishlist_id=item.id,
+                    album_id=item.album_id,
+                    artist_name=artist_name,
+                    album_title=album_title,
+                    status=DownloadStatus.FOUND,
+                    search_query=f"{artist_name} {album_title}",
+                    indexer_name=best_result.get("indexer"),
+                    indexer_id=str(best_result.get("indexer_id", "")),
+                    release_title=best_result.get("title"),
+                    release_size=best_result.get("size"),
+                    release_format=best_result.get("format"),
+                    release_quality=best_result.get("quality"),
+                    seeders=best_result.get("seeders"),
+                    leechers=best_result.get("leechers"),
+                    source="wishlist",
+                )
+                db.add(download)
                 await db.commit()
+                await db.refresh(download)
+
+                # Auto-grab if enabled and score meets threshold
+                if (
+                    cfg.get_bool("auto_download_enabled")
+                    and best_result.get("score", 0)
+                    >= cfg.get_float("auto_download_confidence_threshold", 0.8) * 100
+                ):
+                    active_count = 0
+                    if download_client_service.is_configured:
+                        active_count = await download_client_service.get_active_count()
+
+                    if active_count < cfg.get_int("max_concurrent_downloads", 3):
+                        grab_release.delay(
+                            download_id=download.id,
+                            guid=best_result.get("guid"),
+                            indexer_id=best_result.get("indexer_id"),
+                        )
+                    else:
+                        logger.info(
+                            f"Skipping auto-grab for '{album_title}': "
+                            f"concurrent limit reached ({active_count}/{cfg.get_int('max_concurrent_downloads', 3)})"
+                        )
+
                 return {
                     "status": "found",
                     "results_count": len(results),
+                    "download_id": download.id,
                 }
             else:
                 item.status = WishlistStatus.WANTED
