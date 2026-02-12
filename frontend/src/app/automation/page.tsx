@@ -29,6 +29,7 @@ const TRIGGER_LABELS: Record<string, { label: string; color: string }> = {
   listening_milestone: { label: 'Milestone', color: 'bg-yellow-500/20 text-yellow-400' },
   new_artist_discovered: { label: 'New Artist', color: 'bg-pink-500/20 text-pink-400' },
   schedule: { label: 'Scheduled', color: 'bg-cyan-500/20 text-cyan-400' },
+  playlist_url_check: { label: 'Playlist URL', color: 'bg-orange-500/20 text-orange-400' },
 }
 
 export default function AutomationPage() {
@@ -410,36 +411,67 @@ export default function AutomationPage() {
               </button>
             </div>
             {newRule.actions.map((action, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <select
-                  value={action.type}
-                  onChange={(e) => {
-                    const updated = [...newRule.actions]
-                    updated[i] = { ...action, type: e.target.value }
-                    setNewRule({ ...newRule, actions: updated })
-                  }}
-                  className="input flex-1"
-                >
-                  {(triggers?.action_types || [
-                    { value: 'add_to_wishlist', label: 'Add to Wishlist' },
-                    { value: 'start_download', label: 'Start Download' },
-                    { value: 'send_notification', label: 'Send Notification' },
-                    { value: 'tag_item', label: 'Tag Item' },
-                    { value: 'skip_item', label: 'Skip Item' },
-                    { value: 'add_to_library', label: 'Add to Library' },
-                  ]).map((a: any) => (
-                    <option key={a.value} value={a.value}>{a.label}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={() => {
-                    const updated = newRule.actions.filter((_, idx) => idx !== i)
-                    setNewRule({ ...newRule, actions: updated })
-                  }}
-                  className="p-2 text-surface-500 hover:text-red-400"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+              <div key={i} className="space-y-2 mb-2">
+                <div className="flex gap-2">
+                  <select
+                    value={action.type}
+                    onChange={(e) => {
+                      const updated = [...newRule.actions]
+                      updated[i] = { type: e.target.value, params: {} }
+                      setNewRule({ ...newRule, actions: updated })
+                    }}
+                    className="input flex-1"
+                  >
+                    {(triggers?.action_types || [
+                      { value: 'add_to_wishlist', label: 'Add to Wishlist' },
+                      { value: 'start_download', label: 'Start Download' },
+                      { value: 'send_notification', label: 'Send Notification' },
+                      { value: 'tag_item', label: 'Tag Item' },
+                      { value: 'skip_item', label: 'Skip Item' },
+                      { value: 'add_to_library', label: 'Add to Library' },
+                      { value: 'import_playlist_url', label: 'Import from Playlist URL' },
+                    ]).map((a: any) => (
+                      <option key={a.value} value={a.value}>{a.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => {
+                      const updated = newRule.actions.filter((_, idx) => idx !== i)
+                      setNewRule({ ...newRule, actions: updated })
+                    }}
+                    className="p-2 text-surface-500 hover:text-red-400"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                {action.type === 'import_playlist_url' && (
+                  <div className="flex gap-2 pl-2">
+                    <input
+                      type="text"
+                      placeholder="Playlist URL (Deezer or YouTube)"
+                      value={action.params?.url || ''}
+                      onChange={(e) => {
+                        const updated = [...newRule.actions]
+                        updated[i] = { ...action, params: { ...action.params, url: e.target.value } }
+                        setNewRule({ ...newRule, actions: updated })
+                      }}
+                      className="input flex-1"
+                    />
+                    <select
+                      value={action.params?.priority || 'normal'}
+                      onChange={(e) => {
+                        const updated = [...newRule.actions]
+                        updated[i] = { ...action, params: { ...action.params, priority: e.target.value } }
+                        setNewRule({ ...newRule, actions: updated })
+                      }}
+                      className="input w-32"
+                    >
+                      <option value="low">Low</option>
+                      <option value="normal">Normal</option>
+                      <option value="high">High</option>
+                    </select>
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -35,7 +35,7 @@ class WishlistItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
 
     # What is wanted
-    item_type: Mapped[str] = mapped_column(String(20), index=True)  # artist, album
+    item_type: Mapped[str] = mapped_column(String(20), index=True)  # artist, album, track, playlist
     artist_id: Mapped[Optional[int]] = mapped_column(ForeignKey("artists.id"), index=True)
     album_id: Mapped[Optional[int]] = mapped_column(ForeignKey("albums.id"), index=True)
 
@@ -44,6 +44,9 @@ class WishlistItem(Base):
     album_title: Mapped[Optional[str]] = mapped_column(String(500))
     musicbrainz_id: Mapped[Optional[str]] = mapped_column(String(36))
     spotify_id: Mapped[Optional[str]] = mapped_column(String(50))
+
+    # Artwork (persisted from search results for items not yet in local DB)
+    image_url: Mapped[Optional[str]] = mapped_column(String(1000))
 
     # Status
     status: Mapped[WishlistStatus] = mapped_column(

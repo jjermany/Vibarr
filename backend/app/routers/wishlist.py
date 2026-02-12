@@ -18,13 +18,14 @@ router = APIRouter()
 
 class WishlistItemCreate(BaseModel):
     """Create wishlist item request."""
-    item_type: str  # artist, album
+    item_type: str  # artist, album, track, playlist
     artist_id: Optional[int] = None
     album_id: Optional[int] = None
     artist_name: Optional[str] = None
     album_title: Optional[str] = None
     musicbrainz_id: Optional[str] = None
     spotify_id: Optional[str] = None
+    image_url: Optional[str] = None
     priority: WishlistPriority = WishlistPriority.NORMAL
     preferred_format: Optional[str] = None
     auto_download: bool = False
@@ -102,7 +103,7 @@ async def get_wishlist(
         WishlistItemResponse.model_validate(
             {
                 **_wishlist_item_to_dict(item),
-                "image_url": album_cover_url or artist_image_url,
+                "image_url": item.image_url or album_cover_url or artist_image_url,
             }
         )
         for item, album_cover_url, artist_image_url in rows
@@ -123,6 +124,7 @@ async def add_to_wishlist(
         album_title=item.album_title,
         musicbrainz_id=item.musicbrainz_id,
         spotify_id=item.spotify_id,
+        image_url=item.image_url,
         priority=item.priority,
         preferred_format=item.preferred_format,
         auto_download=item.auto_download,
@@ -163,7 +165,7 @@ async def get_wishlist_item(
     return WishlistItemResponse.model_validate(
         {
             **_wishlist_item_to_dict(item),
-            "image_url": album_cover_url or artist_image_url,
+            "image_url": item.image_url or album_cover_url or artist_image_url,
         }
     )
 
@@ -284,6 +286,7 @@ def _wishlist_item_to_dict(item: WishlistItem) -> dict:
         "priority": item.priority,
         "source": item.source,
         "confidence_score": item.confidence_score,
+        "image_url": item.image_url,
         "auto_download": item.auto_download,
         "created_at": item.created_at,
     }
@@ -291,6 +294,9 @@ def _wishlist_item_to_dict(item: WishlistItem) -> dict:
 
 async def _resolve_item_image(db: AsyncSession, item: WishlistItem) -> Optional[str]:
     """Resolve artwork URL for a wishlist item from album or artist records."""
+    if item.image_url:
+        return item.image_url
+
     if item.album_id:
         album_result = await db.execute(
             select(Album.cover_url).where(Album.id == item.album_id)
