@@ -24,10 +24,38 @@ class _ScalarResult:
 class _FakeRouterDb:
     def __init__(self, item):
         self.item = item
+        self.commit_count = 0
 
     async def execute(self, _query):
         return _ScalarResult(self.item)
 
+    async def commit(self):
+        self.commit_count += 1
+
+
+
+
+class _ScalarsListResult:
+    def __init__(self, items):
+        self._items = items
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._items
+
+
+class _FakeRouterDbMany:
+    def __init__(self, items):
+        self.items = items
+        self.commit_count = 0
+
+    async def execute(self, _query):
+        return _ScalarsListResult(self.items)
+
+    async def commit(self):
+        self.commit_count += 1
 
 class _SessionFactory:
     def __init__(self, session):
@@ -138,6 +166,10 @@ async def test_post_search_wishlist_queues_task_and_returns_immediate_response(m
     assert response.status_code == 200
     assert response.json() == {"status": "search_queued", "id": 44}
     assert queued == {"item_id": 44}
+    assert item.status == WishlistStatus.SEARCHING
+    assert item.last_searched_at is not None
+    assert item.search_count == 1
+    assert fake_db.commit_count == 1
 
 
 @pytest.mark.asyncio
@@ -313,3 +345,39 @@ def test_wishlist_status_badge_values_cover_frontend_states():
     assert WishlistStatus.DOWNLOADING.value == "downloading"
     assert WishlistStatus.DOWNLOADED.value == "downloaded"
     assert WishlistStatus.FAILED.value == "failed"
+
+
+@pytest.mark.asyncio
+async def test_post_search_all_marks_wanted_items_searching_before_queue(monkeypatch):
+    items = [
+        WishlistItem(id=1, item_type="album", status=WishlistStatus.WANTED, search_count=0),
+        WishlistItem(id=2, item_type="artist", status=WishlistStatus.WANTED, search_count=2),
+    ]
+    fake_db = _FakeRouterDbMany(items)
+    queued = {}
+
+    async def override_get_db():
+        yield fake_db
+
+    def fake_delay(**kwargs):
+        queued.update(kwargs)
+
+    monkeypatch.setattr(wishlist_router, "prowlarr_service", type("_Svc", (), {"is_available": True})())
+    monkeypatch.setattr(downloads.process_wishlist, "delay", fake_delay)
+
+    app = FastAPI()
+    app.include_router(wishlist_router.router, prefix="/api/wishlist")
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.post("/api/wishlist/search-all")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "search_all_queued", "items_to_search": 2}
+    assert queued == {"search_all": True}
+    assert fake_db.commit_count == 1
+    assert all(item.status == WishlistStatus.SEARCHING for item in items)
+    assert all(item.last_searched_at is not None for item in items)
+    assert [item.search_count for item in items] == [1, 3]

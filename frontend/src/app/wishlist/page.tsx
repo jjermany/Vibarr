@@ -38,7 +38,7 @@ export default function WishlistPage() {
   const previousStatuses = useRef<Record<number, string>>({})
   const manualSearchItems = useRef<Record<number, string>>({})
 
-  const { data: filteredData, isLoading } = useQuery({
+  const { data: filteredData, isLoading: isFilteredLoading } = useQuery({
     queryKey: ['wishlist', 'filtered', filterStatus],
     queryFn: () =>
       wishlistApi.list(filterStatus !== 'all' ? { status: filterStatus } : undefined),
@@ -65,8 +65,11 @@ export default function WishlistPage() {
 
   const searchMutation = useMutation({
     mutationFn: (id: number) => wishlistApi.search(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['wishlist'] })
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['wishlist', 'filtered'] }),
+        queryClient.refetchQueries({ queryKey: ['wishlist', 'status-feed'] }),
+      ])
     },
     onError: (error: any) => {
       const detail = error?.response?.data?.detail
@@ -76,8 +79,11 @@ export default function WishlistPage() {
 
   const searchAllMutation = useMutation({
     mutationFn: () => wishlistApi.searchAll(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['wishlist'] })
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['wishlist', 'filtered'] }),
+        queryClient.refetchQueries({ queryKey: ['wishlist', 'status-feed'] }),
+      ])
     },
     onError: (error: any) => {
       const detail = error?.response?.data?.detail
@@ -85,10 +91,24 @@ export default function WishlistPage() {
     }
   })
 
-  const items = filteredData?.data || []
   const statusFeedItems = statusFeedData?.data || []
+  const fallbackFilteredItems = filteredData?.data || []
 
-  const activeSearchCount = statusFeedItems.filter((item: WishlistItem) => item.status === 'searching').length
+  const items = useMemo(() => {
+    if (statusFeedItems.length > 0) {
+      if (filterStatus === 'all') {
+        return statusFeedItems
+      }
+
+      return statusFeedItems.filter((item: WishlistItem) => item.status === filterStatus)
+    }
+
+    return fallbackFilteredItems
+  }, [fallbackFilteredItems, filterStatus, statusFeedItems])
+
+  const isLoading = isFilteredLoading && statusFeedItems.length === 0
+
+  const activeSearchCount = items.filter((item: WishlistItem) => item.status === 'searching').length
 
   const statusCounts = useMemo(() => statusFeedItems.reduce(
     (acc: Record<string, number>, item: WishlistItem) => {
@@ -98,10 +118,12 @@ export default function WishlistPage() {
     {}
   ), [statusFeedItems])
 
+  const statusSourceItems = statusFeedItems.length > 0 ? statusFeedItems : items
+
   useEffect(() => {
     const previous = previousStatuses.current
 
-    for (const item of statusFeedItems) {
+    for (const item of statusSourceItems) {
       const priorStatus = previous[item.id]
 
       if (priorStatus === 'searching' && item.status !== 'searching') {
@@ -137,7 +159,7 @@ export default function WishlistPage() {
 
       previous[item.id] = item.status
     }
-  }, [statusFeedItems])
+  }, [statusSourceItems])
 
   const handleSearch = (item: WishlistItem) => {
     manualSearchItems.current[item.id] = item.album_title || item.artist_name || 'Wishlist item'
