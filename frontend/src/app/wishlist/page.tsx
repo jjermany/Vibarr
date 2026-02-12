@@ -163,11 +163,11 @@ export default function WishlistPage() {
     setSelectedIds((current) => {
       const visibleIds = new Set(items.map((item) => item.id))
       const next = new Set<number>()
-      for (const id of current) {
+      current.forEach((id) => {
         if (visibleIds.has(id)) {
           next.add(id)
         }
-      }
+      })
       return next
     })
   }, [items])
