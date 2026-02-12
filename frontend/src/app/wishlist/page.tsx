@@ -42,6 +42,7 @@ export default function WishlistPage() {
     queryKey: ['wishlist', 'filtered', filterStatus],
     queryFn: () =>
       wishlistApi.list(filterStatus !== 'all' ? { status: filterStatus } : undefined),
+    refetchOnMount: 'always',
   })
 
   const { data: statusFeedData } = useQuery({
