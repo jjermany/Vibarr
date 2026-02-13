@@ -1,6 +1,29 @@
 import pytest
+import httpx
 
 from app.services.deezer import DeezerService
+
+
+def test_log_failure_uses_warning_for_timeout(caplog):
+    service = DeezerService()
+
+    with caplog.at_level("WARNING"):
+        service._log_failure(
+            source="deezer album",
+            endpoint_type="search",
+            query="dr",
+            exc=httpx.ConnectTimeout("timed out"),
+        )
+
+    assert "Deezer request failed" in caplog.text
+    assert "ConnectTimeout" in caplog.text
+
+
+def test_request_timeout_prefers_fast_connect_timeout():
+    service = DeezerService()
+
+    assert service.REQUEST_TIMEOUT.connect == 2.0
+    assert service.REQUEST_TIMEOUT.read == 6.0
 
 
 @pytest.mark.asyncio

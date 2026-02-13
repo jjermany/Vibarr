@@ -14,6 +14,7 @@ class DeezerService:
     """Service wrapper around the public Deezer API."""
 
     BASE_URL = "https://api.deezer.com"
+    REQUEST_TIMEOUT = httpx.Timeout(timeout=6.0, connect=2.0)
 
     @property
     def is_available(self) -> bool:
@@ -25,14 +26,14 @@ class DeezerService:
     ) -> Dict[str, Any]:
         """Run a Deezer GET request and return JSON data."""
         url = f"{self.BASE_URL}{path}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT) as client:
             response = await client.get(url, params=params)
             response.raise_for_status()
             return response.json()
 
     async def _get_by_url(self, url: str) -> Dict[str, Any]:
         """Run a Deezer GET request against an absolute URL and return JSON data."""
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT) as client:
             response = await client.get(url)
             response.raise_for_status()
             return response.json()
@@ -47,15 +48,17 @@ class DeezerService:
         identifier: int | str | None = None,
     ) -> None:
         """Log actionable Deezer failures with exception details and context."""
-        logger.exception(
-            "Deezer request failed | source=%s | endpoint=%s | query=%r | identifier=%r | exc_type=%s | exc=%r",
-            source,
-            endpoint_type,
-            query,
-            identifier,
-            type(exc).__name__,
-            exc,
+        message = (
+            "Deezer request failed | source=%s | endpoint=%s | query=%r | "
+            "identifier=%r | exc_type=%s | exc=%r"
         )
+        args = (source, endpoint_type, query, identifier, type(exc).__name__, exc)
+
+        if isinstance(exc, httpx.TimeoutException):
+            logger.warning(message, *args)
+            return
+
+        logger.exception(message, *args)
 
     async def search_artists(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         """Search artists by name."""
