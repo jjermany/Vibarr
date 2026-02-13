@@ -198,7 +198,6 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
                   )}
                   <button
                     onClick={() => {
-                      setDismissedIds(new Set())
                       fetchNotifications()
                     }}
                     className="text-xs text-surface-400 hover:text-white transition-colors"
