@@ -259,20 +259,27 @@ async def get_discovery_home(
         release_section_items.append(item)
 
     # Spotify fallback: if no DB release radar items, use Spotify new releases
+    # Only show Spotify releases if the user actually has library artists — without
+    # a library the global Spotify chart is irrelevant and misleading.
     if not release_section_items and spotify_service.is_available:
         try:
-            spotify_releases = await spotify_service.get_new_releases(limit=20)
-            for album in spotify_releases:
-                release_section_items.append({
-                    "id": f"spotify:{album.get('id', '')}",
-                    "type": "album",
-                    "title": album.get("name", ""),
-                    "image_url": (album.get("images") or [{}])[0].get("url") if album.get("images") else None,
-                    "artist_name": (album.get("artists") or [{}])[0].get("name") if album.get("artists") else None,
-                    "reason": "New release from Spotify",
-                    "confidence": 0.8,
-                    "source": "spotify",
-                })
+            library_count_result = await db.execute(
+                select(func.count(Artist.id)).where(Artist.in_library == True)
+            )
+            library_artist_count = library_count_result.scalar() or 0
+            if library_artist_count > 0:
+                spotify_releases = await spotify_service.get_new_releases(limit=20)
+                for album in spotify_releases:
+                    release_section_items.append({
+                        "id": f"spotify:{album.get('id', '')}",
+                        "type": "album",
+                        "title": album.get("name", ""),
+                        "image_url": (album.get("images") or [{}])[0].get("url") if album.get("images") else None,
+                        "artist_name": (album.get("artists") or [{}])[0].get("name") if album.get("artists") else None,
+                        "reason": "New release from Spotify",
+                        "confidence": 0.8,
+                        "source": "spotify",
+                    })
         except Exception as e:
             logger.warning("Spotify new releases fallback failed: %s", e)
 
@@ -824,8 +831,9 @@ async def explore_genre(
                 break
 
     # Supplement with Deezer artist search only when authoritative genre lookup is
-    # unavailable, or when caller explicitly asks for broadened discovery behavior.
-    should_run_search_fallback = (not has_authoritative_genre_context) or broaden_language
+    # unavailable.  The broaden_language flag controls language filtering only —
+    # it no longer forces a fuzzy text search which would return unrelated artists.
+    should_run_search_fallback = not has_authoritative_genre_context
     search_limit = max(20, limit - len(artists))
     if should_run_search_fallback and search_limit > 0:
         search_artists = await deezer_service.search_artists(
