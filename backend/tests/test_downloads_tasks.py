@@ -296,11 +296,15 @@ class _FakeDirectDownloadClient:
         self.is_configured = is_configured
         self._add_success = add_success
         self._torrent_hash = torrent_hash
+        self.add_calls = 0
+        self.find_hash_calls = 0
 
     async def add_torrent_url(self, _download_url):
+        self.add_calls += 1
         return self._add_success
 
     async def find_torrent_hash(self, release_title):
+        self.find_hash_calls += 1
         return self._torrent_hash
 
 
@@ -441,11 +445,8 @@ async def test_grab_ack_without_client_id_stays_queued(monkeypatch):
 
     monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
     monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
-    monkeypatch.setattr(
-        downloads,
-        "download_client_service",
-        _FakeDirectDownloadClient(add_success=True, torrent_hash=None),
-    )
+    fake_client = _FakeDirectDownloadClient(add_success=True, torrent_hash=None)
+    monkeypatch.setattr(downloads, "download_client_service", fake_client)
 
     grab_result = await downloads._grab_release_async(
         download_id=201,
@@ -460,6 +461,8 @@ async def test_grab_ack_without_client_id_stays_queued(monkeypatch):
     assert grab_result["client_id"] is None
     assert download.status == DownloadStatus.QUEUED
     assert download.status_message == "Queued; waiting for qBittorrent hash"
+    assert fake_client.add_calls == 1
+    assert fake_client.find_hash_calls == 1
     assert wishlist.status == WishlistStatus.DOWNLOADING
 
 
@@ -564,6 +567,56 @@ async def test_check_status_marks_missing_qbit_registration_failed_after_timeout
     assert payload["updated"] == 1
     assert download.status == DownloadStatus.FAILED
     assert "hash resolution timed out" in (download.status_message or "")
+    assert wishlist.status == WishlistStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_check_status_remains_queued_until_hash_timeout_window_expires(monkeypatch):
+    base_time = downloads.datetime.utcnow()
+    wishlist = WishlistItem(id=26, item_type="album", status=WishlistStatus.DOWNLOADING)
+    download = downloads.Download(
+        id=206,
+        artist_name="Artist",
+        album_title="Album",
+        release_title="Artist - Album",
+        status=DownloadStatus.QUEUED,
+        started_at=base_time,
+        wishlist_id=26,
+        download_client="qbittorrent",
+    )
+    session = _FakeMultiSession(download=download, wishlist=wishlist)
+
+    class _FakeDateTime:
+        values = [
+            base_time + downloads.timedelta(minutes=1),
+            base_time + downloads.timedelta(minutes=2),
+            base_time + downloads.timedelta(minutes=4, seconds=1),
+            base_time + downloads.timedelta(minutes=4, seconds=1),
+        ]
+
+        @classmethod
+        def utcnow(cls):
+            return cls.values.pop(0)
+
+    monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(downloads, "download_client_service", _FakeClientForStatus(None))
+    monkeypatch.setattr(downloads, "datetime", _FakeDateTime)
+
+    first_poll = await downloads._check_download_status_async()
+    assert first_poll["updated"] == 1
+    assert download.status == DownloadStatus.QUEUED
+    assert download.status_message == "Queued; waiting for qBittorrent hash"
+
+    second_poll = await downloads._check_download_status_async()
+    assert second_poll["updated"] == 1
+    assert download.status == DownloadStatus.QUEUED
+    assert download.status_message == "Queued; waiting for qBittorrent hash"
+
+    third_poll = await downloads._check_download_status_async()
+    assert third_poll["updated"] == 1
+    assert download.status == DownloadStatus.FAILED
+    assert download.status_message == "qBittorrent hash resolution timed out for queued download"
     assert wishlist.status == WishlistStatus.FAILED
 
 
