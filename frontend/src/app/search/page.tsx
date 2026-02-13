@@ -73,16 +73,17 @@ function SearchPageContent() {
         setDebouncedQuery(query)
         setPlaylistResult(null)
       }
-    }, 300)
+    }, 150)
     return () => clearTimeout(timer)
   }, [query, urlIsPlaylist])
 
-  const { backendReady, isLoading: readinessLoading } = useBackendReadiness()
+  const { backendReady, databaseReady, isLoading: readinessLoading } = useBackendReadiness()
+  const searchReady = databaseReady || backendReady
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['search', debouncedQuery, searchType],
     queryFn: () => searchApi.search(debouncedQuery, SEARCH_TYPE_TO_API[searchType]),
-    enabled: debouncedQuery.length > 0 && backendReady,
+    enabled: debouncedQuery.length > 0 && searchReady,
   })
 
   const results = data?.data || { artists: [], albums: [], tracks: [] }
@@ -212,10 +213,10 @@ function SearchPageContent() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={backendReady ? 'Search artists, albums, tracks \u2014 or paste a playlist URL...' : 'Preparing search services...'}
+          placeholder={searchReady ? 'Search artists, albums, tracks \u2014 or paste a playlist URL...' : 'Preparing search services...'}
           className="w-full pl-12 pr-4 py-3 bg-surface-800 border border-surface-700 rounded-xl text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-lg disabled:opacity-60 disabled:cursor-not-allowed"
           autoFocus
-          disabled={!backendReady}
+          disabled={!searchReady}
         />
         {(isFetching || isResolvingPlaylist) && (
           <div className="absolute right-4 top-1/2 -translate-y-1/2">
@@ -264,7 +265,7 @@ function SearchPageContent() {
         </div>
       </div>
 
-      {urlIsPlaylist && backendReady && !playlistResult && (
+      {urlIsPlaylist && searchReady && !playlistResult && (
         <div className="flex items-center gap-3 p-3 bg-surface-800 rounded-lg border border-orange-500/30 max-w-2xl">
           <ListMusic className="w-5 h-5 text-orange-400 flex-shrink-0" />
           <span className="text-sm text-surface-300">Playlist URL detected</span>
@@ -357,7 +358,7 @@ function SearchPageContent() {
       )}
 
 
-      {!backendReady && (
+      {!searchReady && (
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 max-w-2xl">
           {readinessLoading ? <LoadingSpinner size="sm" /> : <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
           <div>
@@ -395,7 +396,7 @@ function SearchPageContent() {
       {/* Regular search results -- hidden when playlist results are showing */}
       {!playlistResult && (
         <>
-          {!backendReady ? (
+          {!searchReady ? (
             <EmptyState
               icon={<SearchIcon className="w-8 h-8" />}
               title="Starting search services"

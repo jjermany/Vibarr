@@ -41,6 +41,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [notifLoading, setNotifLoading] = useState(false)
   const [hasUnread, setHasUnread] = useState(false)
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
   const menuRef = useRef<HTMLDivElement>(null)
   const notifRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
@@ -183,12 +184,28 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
                 <h4 className="text-sm font-semibold text-white">
                   Notifications
                 </h4>
-                <button
-                  onClick={fetchNotifications}
-                  className="text-xs text-surface-400 hover:text-white transition-colors"
-                >
-                  Refresh
-                </button>
+                <div className="flex items-center gap-3">
+                  {notifications.filter((n) => !dismissedIds.has(`${n.id}-${n.status}`)).length > 0 && (
+                    <button
+                      onClick={() => {
+                        const allKeys = new Set(notifications.map((n) => `${n.id}-${n.status}`))
+                        setDismissedIds(allKeys)
+                      }}
+                      className="text-xs text-surface-400 hover:text-white transition-colors"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setDismissedIds(new Set())
+                      fetchNotifications()
+                    }}
+                    className="text-xs text-surface-400 hover:text-white transition-colors"
+                  >
+                    Refresh
+                  </button>
+                </div>
               </div>
 
               <div className="max-h-80 overflow-y-auto">
@@ -197,13 +214,15 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
                     <Loader2 className="w-4 h-4 animate-spin mr-2" />
                     <span className="text-sm">Loading...</span>
                   </div>
-                ) : notifications.length === 0 ? (
+                ) : notifications.filter((n) => !dismissedIds.has(`${n.id}-${n.status}`)).length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-8 text-surface-500">
                     <Bell className="w-6 h-6 mb-2" />
                     <span className="text-sm">No notifications yet</span>
                   </div>
                 ) : (
-                  notifications.map((n) => (
+                  notifications
+                    .filter((n) => !dismissedIds.has(`${n.id}-${n.status}`))
+                    .map((n) => (
                     <div
                       key={`${n.id}-${n.status}`}
                       className="px-4 py-3 border-b border-surface-700/50 hover:bg-surface-700/30 transition-colors"
@@ -218,6 +237,16 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
                             {timeAgo(n.timestamp)}
                           </p>
                         </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setDismissedIds((prev) => new Set(prev).add(`${n.id}-${n.status}`))
+                          }}
+                          className="p-0.5 text-surface-500 hover:text-white transition-colors flex-shrink-0"
+                          title="Dismiss"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   ))

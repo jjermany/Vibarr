@@ -508,6 +508,9 @@ async def _grab_release_async(
                     download.download_client = "sabnzbd"
                 elif protocol == "torrent":
                     download.download_client = "qbittorrent"
+                else:
+                    # Default to qbittorrent when protocol wasn't specified
+                    download.download_client = "qbittorrent"
 
                 download.started_at = datetime.utcnow()
                 await db.commit()

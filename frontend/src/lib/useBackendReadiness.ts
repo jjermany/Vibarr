@@ -12,9 +12,13 @@ export function useBackendReadiness() {
     refetchOnWindowFocus: true,
   })
 
+  const checks = query.data?.data?.checks
+
   return {
     ...query,
     backendReady: query.data?.data?.status === 'ready',
+    databaseReady: checks?.database === true,
+    checks,
   }
 }
 
