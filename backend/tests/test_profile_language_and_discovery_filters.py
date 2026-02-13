@@ -99,13 +99,16 @@ async def test_explore_genre_uses_deezer_top_artists_and_language_filtering(monk
         return [
             {"id": 1, "name": "English Artist", "nb_fan": 10},
             {"id": 2, "name": "French Artist", "nb_fan": 20},
+            {"id": 3, "name": "Unknown Language Artist", "nb_fan": 30},
         ]
 
     async def fake_get_artist_top_tracks(artist_id, limit=2):
         assert limit == 2
         if artist_id == 1:
             return [{"title": "hit", "language": "en", "artist": {"id": 1, "name": "English Artist"}}]
-        return [{"title": "chanson", "language": "fr", "artist": {"id": 2, "name": "French Artist"}}]
+        if artist_id == 2:
+            return [{"title": "chanson", "language": "fr", "artist": {"id": 2, "name": "French Artist"}}]
+        return [{"title": "instrumental", "artist": {"id": 3, "name": "Unknown Language Artist"}}]
 
     async def fake_search_artists(*_args, **_kwargs):
         raise AssertionError("search fallback should not run when genre id resolves")
@@ -127,8 +130,9 @@ async def test_explore_genre_uses_deezer_top_artists_and_language_filtering(monk
     )
 
     deezer_artists = [a for a in payload["artists"] if str(a["id"]).startswith("deezer:")]
-    assert [artist["name"] for artist in deezer_artists] == ["English Artist"]
+    assert [artist["name"] for artist in deezer_artists] == ["English Artist", "Unknown Language Artist"]
     assert payload["language_filter"]["filtered_count"] >= 1
+    assert payload["language_filter"]["fallback_without_metadata"] >= 1
 
 
 @pytest.mark.asyncio
