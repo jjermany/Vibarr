@@ -505,9 +505,9 @@ async def test_grab_torrent_prefers_prowlarr_before_direct_url(monkeypatch):
     )
 
     assert result["status"] == "grabbed"
-    assert result["client_id"] == "p-123"
-    assert download.status == DownloadStatus.DOWNLOADING
-    assert download.status_message is None
+    assert result["client_id"] is None
+    assert download.status == DownloadStatus.QUEUED
+    assert download.status_message == "Queued; waiting for qBittorrent hash"
     assert wishlist.status == WishlistStatus.DOWNLOADING
 
 
