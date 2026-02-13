@@ -780,6 +780,10 @@ export const settingsApi = {
     api.get<BrowseResult>('/api/settings/browse', { params: { path: path || '/' } }),
   getNotifications: (limit?: number) =>
     api.get<{ notifications: Notification[]; count: number }>('/api/settings/notifications', { params: { limit } }),
+  dismissNotification: (id: number) =>
+    api.delete<{ ok: boolean }>(`/api/settings/notifications/${id}`),
+  dismissAllNotifications: () =>
+    api.delete<{ ok: boolean }>('/api/settings/notifications'),
 }
 
 export const healthApi = {
