@@ -9,6 +9,7 @@ from app.celery_app import celery_app
 from app.database import AsyncSessionLocal
 from app.services.spotify import spotify_service
 from app.services.lastfm import lastfm_service
+from app.services.deezer import deezer_service
 from app.services.advanced_recommendations import (
     build_artist_affinity_matrix,
     build_genre_affinity,
@@ -343,16 +344,18 @@ async def _generate_similar_artist_recommendations(
 
 
 async def _generate_genre_recommendations(db, taste_profile: Dict) -> List[Recommendation]:
-    """Generate recommendations based on genre preferences."""
+    """Generate recommendations based on genre preferences using Deezer.
+
+    Spotify's /recommendations endpoint was deprecated in November 2024, so we
+    use Deezer's genre artist lists as the recommendation source.
+    """
     recommendations = []
 
-    if not spotify_service.is_available:
-        return recommendations
+    from sqlalchemy import func, select
 
     top_genres = taste_profile.get("top_genres", [])[:5]
     if not top_genres:
         # Fall back to library genres
-        from sqlalchemy import select
         result = await db.execute(
             select(Artist.genres)
             .where(Artist.in_library == True)
@@ -368,67 +371,76 @@ async def _generate_genre_recommendations(db, taste_profile: Dict) -> List[Recom
         top_genres = [g for g, _ in genre_counts.most_common(5)]
 
     try:
-        # Build target audio features from taste profile
-        kwargs = {}
-        if taste_profile.get("avg_energy") is not None:
-            kwargs["target_energy"] = taste_profile["avg_energy"]
-        if taste_profile.get("avg_danceability") is not None:
-            kwargs["target_danceability"] = taste_profile["avg_danceability"]
-        if taste_profile.get("avg_valence") is not None:
-            kwargs["target_valence"] = taste_profile["avg_valence"]
+        deezer_genres = await deezer_service.get_genres()
+        genre_id_map = {g.get("name", "").lower(): g.get("id") for g in deezer_genres}
 
-        spotify_recs = await spotify_service.get_recommendations(
-            seed_genres=top_genres[:5],
-            limit=20,
-            **kwargs,
-        )
+        seen_names: set = set()
+        for genre in top_genres[:3]:
+            genre_lower = genre.lower()
+            # Try exact match first, then partial match
+            genre_id = genre_id_map.get(genre_lower)
+            if not genre_id:
+                for deezer_name, gid in genre_id_map.items():
+                    if genre_lower in deezer_name or deezer_name in genre_lower:
+                        genre_id = gid
+                        break
 
-        for track in spotify_recs:
-            artists = track.get("artists", [])
-            if not artists:
+            if not genre_id:
                 continue
 
-            artist_name = artists[0].get("name")
-            artist_spotify_id = artists[0].get("id")
+            deezer_artists = await deezer_service.get_genre_artists(genre_id, limit=20)
+            for artist_data in deezer_artists:
+                artist_name = artist_data.get("name", "")
+                if not artist_name or artist_name.lower() in seen_names:
+                    continue
+                seen_names.add(artist_name.lower())
 
-            # Check if already in library
-            from sqlalchemy import func, select
-            existing = await db.execute(
-                select(Artist).where(
-                    func.lower(Artist.name) == artist_name.lower(),
-                    Artist.in_library == True,
+                # Skip artists already in the library
+                existing = await db.execute(
+                    select(Artist).where(
+                        func.lower(Artist.name) == artist_name.lower(),
+                        Artist.in_library == True,
+                    )
                 )
-            )
-            if existing.scalar_one_or_none():
-                continue
+                if existing.scalar_one_or_none():
+                    continue
 
-            # Find or reference artist
-            artist_result = await db.execute(
-                select(Artist).where(Artist.spotify_id == artist_spotify_id)
-            )
-            db_artist = artist_result.scalar_one_or_none()
+                # Look up artist in DB (may have been searched before)
+                db_artist_result = await db.execute(
+                    select(Artist).where(
+                        func.lower(Artist.name) == artist_name.lower()
+                    )
+                )
+                db_artist = db_artist_result.scalar_one_or_none()
 
-            confidence = _score_recommendation(
-                taste_profile,
-                artist_genres=db_artist.genres if db_artist else [],
-            )
+                confidence = _score_recommendation(
+                    taste_profile,
+                    artist_genres=db_artist.genres if db_artist else [genre],
+                )
 
-            rec = Recommendation(
-                recommendation_type="track",
-                artist_id=db_artist.id if db_artist else None,
-                category="genre_explore",
-                reason=f"Based on your {', '.join(top_genres[:3])} taste",
-                reason_items=[f"Matches your preference for {top_genres[0]}"],
-                confidence_score=round(confidence, 3),
-                relevance_score=0.7,
-                novelty_score=0.7,
-                score_factors={
-                    "genre_match": round(confidence, 3),
-                    "seed_genres": top_genres[:3],
-                },
-                expires_at=datetime.utcnow() + timedelta(days=7),
-            )
-            recommendations.append(rec)
+                rec = Recommendation(
+                    recommendation_type="artist",
+                    artist_id=db_artist.id if db_artist else None,
+                    category="genre_explore",
+                    reason=f"Based on your {', '.join(top_genres[:3])} taste",
+                    reason_items=[f"Matches your preference for {genre}"],
+                    confidence_score=round(confidence, 3),
+                    relevance_score=0.7,
+                    novelty_score=0.7,
+                    score_factors={
+                        "genre_match": round(confidence, 3),
+                        "seed_genres": top_genres[:3],
+                        "source": "deezer",
+                    },
+                    expires_at=datetime.utcnow() + timedelta(days=7),
+                )
+                recommendations.append(rec)
+
+                if len(recommendations) >= 20:
+                    break
+
+            if len(recommendations) >= 20:
+                break
 
     except Exception as e:
         logger.error(f"Error getting genre recommendations: {e}")
@@ -510,61 +522,52 @@ async def _generate_deep_cuts_recommendations(db, taste_profile: Dict) -> List[R
 
 
 async def _generate_mood_recommendations(db, taste_profile: Dict) -> List[Recommendation]:
-    """Generate mood-based recommendations using audio feature targeting."""
+    """Generate mood-based recommendations using Deezer keyword search.
+
+    Spotify's /recommendations endpoint (which supported audio feature targeting)
+    was deprecated in November 2024. We now use Deezer keyword search with
+    mood-appropriate queries as a replacement.
+    """
     recommendations = []
 
-    if not spotify_service.is_available:
-        return recommendations
+    # Mood → Deezer search query mapping
+    mood_queries = {
+        "energetic": "energetic dance workout",
+        "chill": "chill ambient relax",
+        "focus": "instrumental focus study",
+        "happy": "happy upbeat feel good",
+        "sad": "sad acoustic emotional",
+        "workout": "workout cardio high energy",
+    }
 
-    # Define mood profiles to explore
-    moods = [
-        {
-            "name": "energetic",
-            "params": {"target_energy": 0.9, "target_danceability": 0.8, "min_tempo": 120},
-        },
-        {
-            "name": "chill",
-            "params": {"target_energy": 0.3, "target_valence": 0.6, "max_tempo": 110},
-        },
-        {
-            "name": "focus",
-            "params": {"target_instrumentalness": 0.7, "target_energy": 0.4, "target_speechiness": 0.1},
-        },
-    ]
+    moods_to_explore = ["energetic", "chill", "focus"]
 
-    # Pick moods that complement the user's profile
-    top_genres = taste_profile.get("top_genres", [])[:3]
-    seed_genres = top_genres if top_genres else ["pop", "rock", "electronic"]
-
-    for mood in moods:
+    for mood_name in moods_to_explore:
+        query = mood_queries.get(mood_name, mood_name)
         try:
-            tracks = await spotify_service.get_recommendations(
-                seed_genres=seed_genres[:2],
-                limit=5,
-                **mood["params"],
-            )
+            tracks = await deezer_service.search_tracks(query, limit=5)
 
             for track in tracks:
-                artists = track.get("artists", [])
-                if not artists:
+                artist = track.get("artist") or {}
+                album = track.get("album") or {}
+                if not artist.get("name"):
                     continue
 
-                artist_name = artists[0].get("name")
                 rec = Recommendation(
                     recommendation_type="track",
                     category="mood_based",
-                    reason=f"{mood['name'].capitalize()} mood",
-                    reason_items=[f"Perfect for a {mood['name']} mood"],
+                    reason=f"{mood_name.capitalize()} mood",
+                    reason_items=[f"Perfect for a {mood_name} mood"],
                     confidence_score=0.65,
                     relevance_score=0.6,
                     novelty_score=0.8,
-                    score_factors={"mood": mood["name"]},
+                    score_factors={"mood": mood_name, "source": "deezer"},
                     expires_at=datetime.utcnow() + timedelta(days=3),
                 )
                 recommendations.append(rec)
 
         except Exception as e:
-            logger.error(f"Error generating mood recommendations for {mood['name']}: {e}")
+            logger.error(f"Error generating mood recommendations for {mood_name}: {e}")
 
     return recommendations
 

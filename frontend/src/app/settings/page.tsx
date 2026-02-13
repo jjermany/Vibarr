@@ -328,6 +328,8 @@ function ServicesTab() {
       setForm({
         plex_url: s.plex_url ?? '',
         plex_token: s.plex_token ?? '',
+        spotify_client_id: s.spotify_client_id ?? '',
+        spotify_client_secret: s.spotify_client_secret ?? '',
         lastfm_api_key: s.lastfm_api_key ?? '',
         lastfm_shared_secret: s.lastfm_shared_secret ?? '',
         prowlarr_url: s.prowlarr_url ?? '',
@@ -420,6 +422,20 @@ function ServicesTab() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FieldInput label="Plex URL" value={form.plex_url || ''} onChange={(v) => set('plex_url', v)} placeholder="http://localhost:32400" />
           <FieldInput label="Plex Token" value={form.plex_token || ''} onChange={(v) => set('plex_token', v)} secret />
+        </div>
+      </div>
+
+      {/* Spotify */}
+      <div className="card p-6 space-y-4">
+        <h3 className="text-lg font-semibold text-white">Spotify</h3>
+        <p className="text-xs text-surface-400">
+          Used for artist/album metadata, search enrichment, and discovery features.
+          Create an app at <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:text-primary-300 underline">developer.spotify.com/dashboard</a>.
+          Note: Spotify deprecated their recommendations and audio-features APIs in November 2024 for apps without extended access — search and metadata still work normally.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FieldInput label="Client ID" value={form.spotify_client_id || ''} onChange={(v) => set('spotify_client_id', v)} placeholder="Your Spotify client ID" />
+          <FieldInput label="Client Secret" value={form.spotify_client_secret || ''} onChange={(v) => set('spotify_client_secret', v)} secret placeholder="Your Spotify client secret" />
         </div>
       </div>
 

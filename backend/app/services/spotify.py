@@ -1,15 +1,29 @@
 """Spotify API integration for metadata and recommendations."""
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 import asyncio
 import logging
 
 import spotipy
+from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyClientCredentials
 
 from app.services import app_settings as cfg
 
 logger = logging.getLogger(__name__)
+
+# Spotify deprecated these endpoints in November 2024 for apps without extended access:
+#   GET /recommendations            → 404
+#   GET /audio-features             → 403
+#   GET /artists/{id}/related-artists → 403
+#   GET /recommendations/available-genre-seeds → 404
+# Search, get artist/album/track, and new releases continue to work.
+_DEPRECATED_ENDPOINTS = {
+    "recommendations",
+    "audio_features",
+    "related_artists",
+    "genre_seeds",
+}
 
 
 class SpotifyService:
@@ -18,6 +32,23 @@ class SpotifyService:
     def __init__(self):
         """Initialize Spotify client."""
         self._client: Optional[spotipy.Spotify] = None
+        self._deprecation_warned: Set[str] = set()
+
+    def _warn_deprecated(self, endpoint: str) -> None:
+        """Log a deprecation warning once per endpoint per process lifetime."""
+        if endpoint not in self._deprecation_warned:
+            self._deprecation_warned.add(endpoint)
+            logger.warning(
+                f"Spotify endpoint '{endpoint}' is deprecated as of November 2024 and is "
+                "no longer available for apps without extended access. "
+                "See https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api"
+            )
+
+    def _is_deprecated_error(self, exc: Exception) -> bool:
+        """Return True if the exception indicates a deprecated-endpoint response (403/404)."""
+        if isinstance(exc, SpotifyException):
+            return exc.http_status in (403, 404)
+        return False
 
     @property
     def client(self) -> Optional[spotipy.Spotify]:
@@ -116,7 +147,11 @@ class SpotifyService:
             return []
 
     async def get_related_artists(self, spotify_id: str) -> List[Dict[str, Any]]:
-        """Get related artists (Spotify's recommendation)."""
+        """Get related artists.
+
+        NOTE: Deprecated by Spotify in November 2024 — returns empty list with a
+        one-time warning rather than propagating errors.
+        """
         if not self.client:
             return []
 
@@ -126,6 +161,9 @@ class SpotifyService:
             )
             return results.get("artists", [])
         except Exception as e:
+            if self._is_deprecated_error(e):
+                self._warn_deprecated("related_artists")
+                return []
             logger.error(f"Spotify get related artists failed: {e}")
             return []
 
@@ -155,12 +193,15 @@ class SpotifyService:
             return []
 
     async def get_audio_features(self, track_ids: List[str]) -> List[Dict[str, Any]]:
-        """Get audio features for multiple tracks."""
+        """Get audio features for multiple tracks.
+
+        NOTE: Deprecated by Spotify in November 2024 — returns empty list with a
+        one-time warning rather than propagating errors.
+        """
         if not self.client or not track_ids:
             return []
 
         try:
-            # Spotify allows max 100 tracks per request
             all_features = []
             for i in range(0, len(track_ids), 100):
                 batch = track_ids[i:i + 100]
@@ -168,6 +209,9 @@ class SpotifyService:
                 all_features.extend([f for f in features if f])
             return all_features
         except Exception as e:
+            if self._is_deprecated_error(e):
+                self._warn_deprecated("audio_features")
+                return []
             logger.error(f"Spotify get audio features failed: {e}")
             return []
 
@@ -179,8 +223,10 @@ class SpotifyService:
         limit: int = 20,
         **kwargs,
     ) -> List[Dict[str, Any]]:
-        """
-        Get recommendations based on seeds.
+        """Get recommendations based on seeds.
+
+        NOTE: Deprecated by Spotify in November 2024 — returns empty list with a
+        one-time warning rather than propagating errors.
 
         Additional kwargs can include audio feature targets:
         - target_danceability, target_energy, target_valence, etc.
@@ -200,11 +246,18 @@ class SpotifyService:
             )
             return results.get("tracks", [])
         except Exception as e:
+            if self._is_deprecated_error(e):
+                self._warn_deprecated("recommendations")
+                return []
             logger.error(f"Spotify get recommendations failed: {e}")
             return []
 
     async def get_available_genre_seeds(self) -> List[str]:
-        """Get available genre seeds for recommendations."""
+        """Get available genre seeds for recommendations.
+
+        NOTE: Deprecated by Spotify in November 2024 — returns empty list with a
+        one-time warning rather than propagating errors.
+        """
         if not self.client:
             return []
 
@@ -212,6 +265,9 @@ class SpotifyService:
             results = await asyncio.to_thread(self.client.recommendation_genre_seeds)
             return results.get("genres", [])
         except Exception as e:
+            if self._is_deprecated_error(e):
+                self._warn_deprecated("genre_seeds")
+                return []
             logger.error(f"Spotify get genre seeds failed: {e}")
             return []
 

@@ -35,8 +35,39 @@ def _contains_any_token(text: str, tokens: List[str]) -> bool:
     return any(token in haystack for token in tokens if len(token) > 2)
 
 
+# Maps common UI genre names to Deezer genre name variants
+_GENRE_ALIASES: Dict[str, List[str]] = {
+    "hip hop": ["rap/hip hop", "rap", "hip-hop", "hip hop/rap"],
+    "r&b": ["r&b/soul", "soul", "r&b/soul/funk", "rhythm and blues"],
+    "electronic": ["electro", "dance", "house", "techno", "electronica", "electronic music"],
+    "classical": ["classical/opera", "opera", "orchestral"],
+    "alternative": ["alternative/indie", "indie", "alternative rock"],
+    "country": ["country/folk", "folk/country"],
+    "world": ["world music", "latin", "world/latin"],
+    "metal": ["heavy metal", "hard rock/metal"],
+}
+
+
 def _preferred_genre_match(value: str, genre: str) -> bool:
-    return (value or "").strip().lower() == (genre or "").strip().lower()
+    """Match a Deezer genre name against a UI genre name, including known aliases."""
+    v = (value or "").strip().lower()
+    g = (genre or "").strip().lower()
+    if v == g:
+        return True
+    # Check if the genre's token appears in the Deezer name (e.g. "hip hop" in "rap/hip hop")
+    if g and g in v:
+        return True
+    # Check alias mappings
+    aliases = _GENRE_ALIASES.get(g, [])
+    for alias in aliases:
+        if v == alias or alias in v:
+            return True
+    # Reverse: check if any alias token appears in the query genre
+    for canonical, alias_list in _GENRE_ALIASES.items():
+        if v == canonical or v in [a.lower() for a in alias_list]:
+            if g == canonical or g in [a.lower() for a in alias_list]:
+                return True
+    return False
 
 
 
@@ -700,23 +731,9 @@ async def explore_genre(
             f'genre:"{genre}"', limit=max(40, min(limit * 3, 150))
         )
 
-    genre_tokens = _tokenize(genre)
     for track in deezer_tracks:
         artist = track.get("artist") or {}
         album = track.get("album") or {}
-        title_blob = " ".join(
-            [
-                track.get("title", ""),
-                artist.get("name", ""),
-                album.get("title", ""),
-            ]
-        )
-        if (
-            not has_authoritative_genre_context
-            and genre_tokens
-            and not _contains_any_token(title_blob, genre_tokens)
-        ):
-            continue
 
         metadata_language = _extract_language_metadata(track)
         if metadata_language:
