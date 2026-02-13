@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional
 import logging
 
@@ -36,7 +37,16 @@ class YTMusicService:
         if not self.client:
             return []
         try:
-            return self.client.search(query=query, filter=filter, limit=limit) or []
+            return (
+                await asyncio.to_thread(
+                    self.client.search,
+                    query,
+                    filter,
+                    None,
+                    limit,
+                )
+                or []
+            )
         except Exception as exc:
             logger.error(f"YTMusic search failed ({filter}): {exc}")
             return []
@@ -57,7 +67,7 @@ class YTMusicService:
         if not self.client:
             return None
         try:
-            return self.client.get_artist(channelId=browse_id)
+            return await asyncio.to_thread(self.client.get_artist, browse_id)
         except Exception as exc:
             logger.error(f"YTMusic get_artist failed: {exc}")
             return None
@@ -70,7 +80,11 @@ class YTMusicService:
         if not self.client:
             return None
         try:
-            return self.client.get_playlist(playlistId=playlist_id, limit=limit)
+            return await asyncio.to_thread(
+                self.client.get_playlist,
+                playlist_id,
+                limit,
+            )
         except Exception as exc:
             logger.error(f"YTMusic get_playlist failed: {exc}")
             return None

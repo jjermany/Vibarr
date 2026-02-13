@@ -163,6 +163,35 @@ class DeezerService:
             )
             return []
 
+    async def get_genres(self) -> List[Dict[str, Any]]:
+        """Get Deezer's list of supported genres."""
+        try:
+            payload = await self._get("/genre")
+            return payload.get("data", []) or []
+        except Exception as exc:
+            self._log_failure(
+                source="deezer genre",
+                endpoint_type="get_genres",
+                exc=exc,
+            )
+            return []
+
+    async def get_genre_artists(
+        self, genre_id: int | str, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Get top artists for a Deezer genre."""
+        try:
+            payload = await self._get(f"/genre/{genre_id}/artists", {"limit": limit})
+            return payload.get("data", []) or []
+        except Exception as exc:
+            self._log_failure(
+                source="deezer artist",
+                endpoint_type="get_genre_artists",
+                identifier=genre_id,
+                exc=exc,
+            )
+            return []
+
 
     async def get_playlist(self, playlist_id: int | str) -> Optional[Dict[str, Any]]:
         """Get Deezer playlist metadata including embedded tracks."""

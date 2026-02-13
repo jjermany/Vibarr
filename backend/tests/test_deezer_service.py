@@ -98,3 +98,35 @@ async def test_get_playlist_with_tracks_replaces_embedded_tracks(monkeypatch):
     assert playlist["tracks"]["data"] == [{"id": 1}, {"id": 2}]
     assert playlist["tracks"]["total"] == 2
     assert "next" not in playlist["tracks"]
+
+
+@pytest.mark.asyncio
+async def test_get_genres_returns_data(monkeypatch):
+    service = DeezerService()
+
+    async def fake_get(path, params=None):
+        assert path == "/genre"
+        assert params is None
+        return {"data": [{"id": 132, "name": "Pop"}]}
+
+    monkeypatch.setattr(service, "_get", fake_get)
+
+    genres = await service.get_genres()
+
+    assert genres == [{"id": 132, "name": "Pop"}]
+
+
+@pytest.mark.asyncio
+async def test_get_genre_artists_returns_data(monkeypatch):
+    service = DeezerService()
+
+    async def fake_get(path, params=None):
+        assert path == "/genre/132/artists"
+        assert params == {"limit": 12}
+        return {"data": [{"id": 1, "name": "Artist"}]}
+
+    monkeypatch.setattr(service, "_get", fake_get)
+
+    artists = await service.get_genre_artists(132, limit=12)
+
+    assert artists == [{"id": 1, "name": "Artist"}]
