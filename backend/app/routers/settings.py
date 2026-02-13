@@ -747,9 +747,10 @@ async def get_notifications(
     from app.models.download import Download, DownloadStatus
     from sqlalchemy import desc
 
-    # Fetch recent downloads as notification-like events
+    # Fetch recent non-dismissed downloads as notification-like events
     result = await db.execute(
         select(Download)
+        .where(Download.notification_dismissed == False)
         .order_by(desc(Download.updated_at))
         .limit(limit)
     )
@@ -789,6 +790,41 @@ async def get_notifications(
         })
 
     return {"notifications": notifications, "count": len(notifications)}
+
+
+@router.delete("/notifications/{notification_id}")
+async def dismiss_notification(
+    notification_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Dismiss a single notification by download ID. Admin only."""
+    from app.models.download import Download
+
+    result = await db.execute(select(Download).where(Download.id == notification_id))
+    dl = result.scalar_one_or_none()
+    if dl:
+        dl.notification_dismissed = True
+        await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/notifications")
+async def dismiss_all_notifications(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Dismiss all current notifications. Admin only."""
+    from app.models.download import Download
+    from sqlalchemy import update
+
+    await db.execute(
+        update(Download)
+        .where(Download.notification_dismissed == False)
+        .values(notification_dismissed=True)
+    )
+    await db.commit()
+    return {"ok": True}
 
 
 # --- Helpers ---

@@ -73,6 +73,9 @@ class Download(Base):
     beets_imported: Mapped[bool] = mapped_column(Boolean, default=False)
     final_path: Mapped[Optional[str]] = mapped_column(String(1000))
 
+    # Notification dismissal
+    notification_dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Source tracking
     source: Mapped[str] = mapped_column(String(50), default="manual")  # manual, auto, wishlist
 

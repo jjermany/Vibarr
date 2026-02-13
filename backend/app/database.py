@@ -119,6 +119,11 @@ async def _apply_schema_migrations(conn) -> None:
             "secondary_languages",
             "ALTER TABLE users ADD COLUMN secondary_languages JSON",
         ),
+        (
+            "downloads",
+            "notification_dismissed",
+            "ALTER TABLE downloads ADD COLUMN notification_dismissed BOOLEAN NOT NULL DEFAULT FALSE",
+        ),
     ]
     for table, column, ddl in migrations:
         result = await conn.execute(
