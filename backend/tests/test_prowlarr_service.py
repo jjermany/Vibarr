@@ -130,6 +130,65 @@ async def test_grab_posts_expected_payload_and_returns_success_with_optional_id(
 
 
 @pytest.mark.asyncio
+async def test_grab_falls_back_to_search_when_release_endpoint_missing(monkeypatch):
+    service = ProwlarrService()
+
+    release_response = Mock()
+    release_response.status_code = 404
+    release_response.text = '{"message":"endpoint not found"}'
+    release_response.is_error = True
+
+    search_response = Mock()
+    search_response.content = b'{"id":"grab-456"}'
+    search_response.json.return_value = {"id": "grab-456"}
+    search_response.is_error = False
+    search_response.raise_for_status.return_value = None
+
+    client = AsyncMock()
+    client.is_closed = False
+    client.post.side_effect = [release_response, search_response]
+
+    monkeypatch.setattr(service, "_client", client)
+
+    result = await service.grab(guid="abc-guid", indexer_id=42)
+
+    assert result == {"success": True, "download_id": "grab-456"}
+    assert client.post.await_count == 2
+    first_call = client.post.await_args_list[0]
+    second_call = client.post.await_args_list[1]
+    assert first_call.args == ("/api/v1/release",)
+    assert second_call.args == ("/api/v1/search",)
+
+
+@pytest.mark.asyncio
+async def test_grab_returns_failure_when_release_and_search_fail(monkeypatch):
+    service = ProwlarrService()
+
+    release_response = Mock()
+    release_response.status_code = 404
+    release_response.text = '{"message":"endpoint not found"}'
+    release_response.is_error = True
+
+    search_response = Mock()
+    search_response.status_code = 500
+    search_response.text = '{"message":"internal server error"}'
+    search_response.is_error = True
+    search_response.raise_for_status.side_effect = Exception("search failed")
+
+    client = AsyncMock()
+    client.is_closed = False
+    client.post.side_effect = [release_response, search_response]
+
+    monkeypatch.setattr(service, "_client", client)
+
+    result = await service.grab(guid="abc-guid", indexer_id=42)
+
+    assert result == {"success": False, "download_id": None}
+    assert client.post.await_count == 2
+
+
+
+@pytest.mark.asyncio
 async def test_grab_accepts_success_without_client_id(monkeypatch):
     service = ProwlarrService()
 

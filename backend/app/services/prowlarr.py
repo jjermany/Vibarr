@@ -217,23 +217,23 @@ class ProwlarrService:
         if not self.client:
             return {"success": False, "download_id": None}
 
+        payload = {
+            "guid": guid,
+            "indexerId": indexer_id,
+        }
+
         try:
-            # Prowlarr v1 API handles release grabs via POST /api/v1/release.
-            grab_endpoint = "/api/v1/release"
-            response = await self.client.post(
-                grab_endpoint,
-                json={
-                    "guid": guid,
-                    "indexerId": indexer_id,
-                },
-            )
+            endpoint = "/api/v1/release"
+            response = await self.client.post(endpoint, json=payload)
+
+            if self._should_fallback_to_search(response):
+                self._log_grab_failure(endpoint, response)
+                endpoint = "/api/v1/search"
+                response = await self.client.post(endpoint, json=payload)
 
             if response.is_error:
-                logger.error(
-                    "Prowlarr grab failed with status %s and body %s",
-                    response.status_code,
-                    response.text,
-                )
+                self._log_grab_failure(endpoint, response)
+
             response.raise_for_status()
 
             response_data: Dict[str, Any] = {}
@@ -250,6 +250,42 @@ class ProwlarrService:
         except Exception as e:
             logger.error(f"Prowlarr grab failed: {e}")
             return {"success": False, "download_id": None}
+
+    def _should_fallback_to_search(self, response: httpx.Response) -> bool:
+        """Return True when /release is unavailable and we should retry /search."""
+        if response.status_code in (404, 405):
+            return True
+
+        if not response.is_error:
+            return False
+
+        body = self._short_response_body(response).lower()
+        return any(
+            marker in body
+            for marker in (
+                "endpoint not found",
+                "not found",
+                "no route matched",
+                "unsupported endpoint",
+                "method not allowed",
+            )
+        )
+
+    def _short_response_body(self, response: httpx.Response, max_len: int = 300) -> str:
+        """Return a compact response body suitable for logs."""
+        body = (response.text or "").replace("\n", " ").strip()
+        if len(body) > max_len:
+            return f"{body[:max_len]}..."
+        return body or "<empty>"
+
+    def _log_grab_failure(self, endpoint: str, response: httpx.Response) -> None:
+        """Log failed grab response details."""
+        logger.error(
+            "Prowlarr grab request failed endpoint=%s status_code=%s body=%s",
+            endpoint,
+            response.status_code,
+            self._short_response_body(response),
+        )
 
     async def get_download_clients(self) -> List[Dict[str, Any]]:
         """Get configured download clients."""
