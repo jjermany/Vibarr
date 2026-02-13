@@ -561,7 +561,11 @@ async def explore_genre(
         None,
     )
 
-    if deezer_genre and deezer_genre.get("id") is not None:
+    has_authoritative_genre_context = bool(
+        deezer_genre and deezer_genre.get("id") is not None
+    )
+
+    if has_authoritative_genre_context:
         deezer_artists = await deezer_service.get_genre_artists(
             deezer_genre["id"], limit=max(40, min(limit * 2, 120))
         )
@@ -618,7 +622,11 @@ async def explore_genre(
                 album.get("title", ""),
             ]
         )
-        if genre_tokens and not _contains_any_token(title_blob, genre_tokens):
+        if (
+            not has_authoritative_genre_context
+            and genre_tokens
+            and not _contains_any_token(title_blob, genre_tokens)
+        ):
             continue
 
         metadata_language = _extract_language_metadata(track)

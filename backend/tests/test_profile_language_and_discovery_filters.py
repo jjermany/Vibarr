@@ -125,3 +125,61 @@ async def test_explore_genre_uses_deezer_top_artists_and_language_filtering(monk
     deezer_artists = [a for a in payload["artists"] if str(a["id"]).startswith("deezer:")]
     assert [artist["name"] for artist in deezer_artists] == ["English Artist"]
     assert payload["language_filter"]["filtered_count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_explore_genre_populates_albums_from_genre_artists_without_genre_tokens(monkeypatch):
+    class _EmptyResult:
+        class _Scalars:
+            def all(self):
+                return []
+
+        def scalars(self):
+            return self._Scalars()
+
+    class _FakeDb:
+        async def execute(self, _query):
+            return _EmptyResult()
+
+    async def fake_get_genres():
+        return [{"id": 132, "name": "Pop"}]
+
+    async def fake_get_genre_artists(genre_id, limit=50):
+        assert genre_id == 132
+        assert limit >= 40
+        return [{"id": 99, "name": "Synth Master", "nb_fan": 100}]
+
+    async def fake_get_artist_top_tracks(artist_id, limit=2):
+        assert artist_id == 99
+        assert limit == 2
+        return [
+            {
+                "title": "Midnight Drive",
+                "language": "en",
+                "artist": {"id": 99, "name": "Synth Master"},
+                "album": {"id": 8801, "title": "Neon Nights", "cover": "cover-url"},
+            }
+        ]
+
+    async def fail_search_tracks(*_args, **_kwargs):
+        raise AssertionError("fallback search should not be used when Deezer genre id resolves")
+
+    monkeypatch.setattr(discovery.deezer_service, "get_genres", fake_get_genres)
+    monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", fake_get_genre_artists)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", fake_get_artist_top_tracks)
+    monkeypatch.setattr(discovery.deezer_service, "search_tracks", fail_search_tracks)
+
+    user = type("U", (), {"preferred_language": "en", "secondary_languages": []})()
+
+    payload = await discovery.explore_genre(
+        genre="pop",
+        sort="popular",
+        limit=10,
+        broaden_language=False,
+        current_user=user,
+        db=_FakeDb(),
+    )
+
+    deezer_albums = [a for a in payload["albums"] if str(a["id"]).startswith("deezer:")]
+    assert deezer_albums
+    assert deezer_albums[0]["title"] == "Neon Nights"
