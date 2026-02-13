@@ -1,6 +1,10 @@
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from app.routers import auth, discovery
+from app.database import get_db
+from app.services.auth import get_current_user
 
 
 class _FakeDb:
@@ -183,3 +187,162 @@ async def test_explore_genre_populates_albums_from_genre_artists_without_genre_t
     deezer_albums = [a for a in payload["albums"] if str(a["id"]).startswith("deezer:")]
     assert deezer_albums
     assert deezer_albums[0]["title"] == "Neon Nights"
+
+
+@pytest.mark.asyncio
+async def test_explore_genre_endpoint_returns_relevant_artists_and_albums_without_genre_tokens(monkeypatch):
+    class _EmptyResult:
+        class _Scalars:
+            def all(self):
+                return []
+
+        def scalars(self):
+            return self._Scalars()
+
+    class _FakeDb:
+        async def execute(self, _query):
+            return _EmptyResult()
+
+    async def fake_get_genres():
+        return [{"id": 132, "name": "Pop"}]
+
+    async def fake_get_genre_artists(genre_id, limit=50):
+        assert genre_id == 132
+        assert limit >= 40
+        return [{"id": 991, "name": "Moonline", "nb_fan": 5000}]
+
+    async def fake_get_artist_top_tracks(artist_id, limit=2):
+        assert artist_id == 991
+        assert limit == 2
+        return [
+            {
+                "id": 7701,
+                "title": "Night Driver",
+                "artist": {"id": 991, "name": "Moonline"},
+                "album": {"id": 8801, "title": "City Lights", "cover": "cover-url"},
+                "language": "en",
+            }
+        ]
+
+    monkeypatch.setattr(discovery.deezer_service, "get_genres", fake_get_genres)
+    monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", fake_get_genre_artists)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", fake_get_artist_top_tracks)
+
+    app = FastAPI()
+    app.include_router(discovery.router, prefix="/api/discovery")
+
+    async def override_get_db():
+        yield _FakeDb()
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: type(
+        "U", (), {"preferred_language": "en", "secondary_languages": []}
+    )()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.get("/api/discovery/genre/pop", params={"limit": 10})
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert any(a["name"] == "Moonline" and a["source"] == "deezer" for a in payload["artists"])
+    assert any(a["title"] == "City Lights" and a["source"] == "deezer" for a in payload["albums"])
+
+
+@pytest.mark.asyncio
+async def test_search_and_genre_endpoints_have_bounded_behavior_with_delayed_providers(monkeypatch):
+    class _EmptyResult:
+        class _Scalars:
+            def all(self):
+                return []
+
+        def scalars(self):
+            return self._Scalars()
+
+    class _FakeDb:
+        async def execute(self, _query):
+            return _EmptyResult()
+
+    async def override_get_db():
+        yield _FakeDb()
+
+    # /api/search: delayed provider work should be capped by _with_timeout.
+    from app.routers import search as search_router
+    import asyncio
+    from time import perf_counter
+
+    async def delayed_search_artist(_query: str, limit: int):
+        await asyncio.sleep(0.2)
+        return [{"id": 1, "name": "Too Slow"}]
+
+    async def fast_timeout(coro, seconds: float = 8.0):
+        try:
+            return await asyncio.wait_for(coro, timeout=0.05)
+        except asyncio.TimeoutError:
+            return []
+
+    monkeypatch.setattr(search_router, "_search_deezer_artists", delayed_search_artist)
+    monkeypatch.setattr(search_router, "_with_timeout", fast_timeout)
+
+    search_app = FastAPI()
+    search_app.include_router(search_router.router, prefix="/api/search")
+    search_app.dependency_overrides[get_db] = override_get_db
+
+    started = perf_counter()
+    async with AsyncClient(
+        transport=ASGITransport(app=search_app), base_url="http://testserver"
+    ) as client:
+        response = await client.get(
+            "/api/search",
+            params={"q": "slow", "type": "artist", "source": "deezer", "limit": 5},
+        )
+    elapsed = perf_counter() - started
+
+    assert response.status_code == 200
+    assert response.json()["artists"] == []
+    assert elapsed < 0.2
+
+    # /api/discovery/genre/pop: delayed upstream calls should remain bounded for one-artist payload.
+    async def delayed_get_genres():
+        await asyncio.sleep(0.05)
+        return [{"id": 132, "name": "Pop"}]
+
+    async def delayed_get_genre_artists(_genre_id, limit=50):
+        await asyncio.sleep(0.05)
+        return [{"id": 3, "name": "Bounded Artist", "nb_fan": 10}]
+
+    async def delayed_get_artist_top_tracks(_artist_id, limit=2):
+        await asyncio.sleep(0.05)
+        return [
+            {
+                "title": "Skyline",
+                "artist": {"id": 3, "name": "Bounded Artist"},
+                "album": {"id": 33, "title": "Bounded Album"},
+                "language": "en",
+            }
+        ]
+
+    monkeypatch.setattr(discovery.deezer_service, "get_genres", delayed_get_genres)
+    monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", delayed_get_genre_artists)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", delayed_get_artist_top_tracks)
+
+    discovery_app = FastAPI()
+    discovery_app.include_router(discovery.router, prefix="/api/discovery")
+    discovery_app.dependency_overrides[get_db] = override_get_db
+    discovery_app.dependency_overrides[get_current_user] = lambda: type(
+        "U", (), {"preferred_language": "en", "secondary_languages": []}
+    )()
+
+    started = perf_counter()
+    async with AsyncClient(
+        transport=ASGITransport(app=discovery_app), base_url="http://testserver"
+    ) as client:
+        response = await client.get("/api/discovery/genre/pop", params={"limit": 5})
+    elapsed = perf_counter() - started
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(a["name"] == "Bounded Artist" for a in payload["artists"])
+    assert any(a["title"] == "Bounded Album" for a in payload["albums"])
+    assert elapsed < 0.4
