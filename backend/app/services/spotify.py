@@ -1,6 +1,7 @@
 """Spotify API integration for metadata and recommendations."""
 
 from typing import Optional, List, Dict, Any
+import asyncio
 import logging
 
 import spotipy
@@ -45,7 +46,9 @@ class SpotifyService:
             return []
 
         try:
-            results = self.client.search(q=query, type="artist", limit=limit)
+            results = await asyncio.to_thread(
+                self.client.search, q=query, type="artist", limit=limit
+            )
             return results.get("artists", {}).get("items", [])
         except Exception as e:
             logger.error(f"Spotify artist search failed: {e}")
@@ -57,7 +60,9 @@ class SpotifyService:
             return []
 
         try:
-            results = self.client.search(q=query, type="album", limit=limit)
+            results = await asyncio.to_thread(
+                self.client.search, q=query, type="album", limit=limit
+            )
             return results.get("albums", {}).get("items", [])
         except Exception as e:
             logger.error(f"Spotify album search failed: {e}")
@@ -69,7 +74,9 @@ class SpotifyService:
             return []
 
         try:
-            results = self.client.search(q=query, type="track", limit=limit)
+            results = await asyncio.to_thread(
+                self.client.search, q=query, type="track", limit=limit
+            )
             return results.get("tracks", {}).get("items", [])
         except Exception as e:
             logger.error(f"Spotify track search failed: {e}")
@@ -81,7 +88,7 @@ class SpotifyService:
             return None
 
         try:
-            return self.client.artist(spotify_id)
+            return await asyncio.to_thread(self.client.artist, spotify_id)
         except Exception as e:
             logger.error(f"Spotify get artist failed: {e}")
             return None
@@ -97,7 +104,8 @@ class SpotifyService:
             return []
 
         try:
-            results = self.client.artist_albums(
+            results = await asyncio.to_thread(
+                self.client.artist_albums,
                 spotify_id,
                 album_type=album_type,
                 limit=limit,
@@ -113,7 +121,9 @@ class SpotifyService:
             return []
 
         try:
-            results = self.client.artist_related_artists(spotify_id)
+            results = await asyncio.to_thread(
+                self.client.artist_related_artists, spotify_id
+            )
             return results.get("artists", [])
         except Exception as e:
             logger.error(f"Spotify get related artists failed: {e}")
@@ -125,7 +135,7 @@ class SpotifyService:
             return None
 
         try:
-            return self.client.album(spotify_id)
+            return await asyncio.to_thread(self.client.album, spotify_id)
         except Exception as e:
             logger.error(f"Spotify get album failed: {e}")
             return None
@@ -136,7 +146,9 @@ class SpotifyService:
             return []
 
         try:
-            results = self.client.album_tracks(spotify_id, limit=50)
+            results = await asyncio.to_thread(
+                self.client.album_tracks, spotify_id, limit=50
+            )
             return results.get("items", [])
         except Exception as e:
             logger.error(f"Spotify get album tracks failed: {e}")
@@ -152,7 +164,7 @@ class SpotifyService:
             all_features = []
             for i in range(0, len(track_ids), 100):
                 batch = track_ids[i:i + 100]
-                features = self.client.audio_features(batch)
+                features = await asyncio.to_thread(self.client.audio_features, batch)
                 all_features.extend([f for f in features if f])
             return all_features
         except Exception as e:
@@ -178,7 +190,8 @@ class SpotifyService:
             return []
 
         try:
-            results = self.client.recommendations(
+            results = await asyncio.to_thread(
+                self.client.recommendations,
                 seed_artists=seed_artists or [],
                 seed_tracks=seed_tracks or [],
                 seed_genres=seed_genres or [],
@@ -196,7 +209,7 @@ class SpotifyService:
             return []
 
         try:
-            results = self.client.recommendation_genre_seeds()
+            results = await asyncio.to_thread(self.client.recommendation_genre_seeds)
             return results.get("genres", [])
         except Exception as e:
             logger.error(f"Spotify get genre seeds failed: {e}")
@@ -208,7 +221,7 @@ class SpotifyService:
             return []
 
         try:
-            results = self.client.new_releases(limit=limit)
+            results = await asyncio.to_thread(self.client.new_releases, limit=limit)
             return results.get("albums", {}).get("items", [])
         except Exception as e:
             logger.error(f"Spotify get new releases failed: {e}")
