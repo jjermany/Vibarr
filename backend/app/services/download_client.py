@@ -89,7 +89,7 @@ class DownloadClientService:
         return bool(cfg.get_optional("qbittorrent_url"))
 
     async def _get_client(self) -> Optional[httpx.AsyncClient]:
-        """Get authenticated HTTP client."""
+        """Get authenticated HTTP client, re-authenticating if session expired."""
         if not self.is_configured:
             return None
 
@@ -103,6 +103,25 @@ class DownloadClientService:
             await self._authenticate()
 
         return self._client if self._authenticated else None
+
+    async def _request(self, method: str, path: str, **kwargs) -> Optional[httpx.Response]:
+        """Make a request, retrying once with re-auth on 403 (session expired)."""
+        client = await self._get_client()
+        if not client:
+            return None
+        try:
+            response = await getattr(client, method)(path, **kwargs)
+            if response.status_code == 403:
+                # Session may have expired - re-authenticate and retry once
+                self._authenticated = False
+                client = await self._get_client()
+                if not client:
+                    return None
+                response = await getattr(client, method)(path, **kwargs)
+            return response
+        except Exception as e:
+            logger.error(f"qBittorrent request {method.upper()} {path} failed: {e}")
+            return None
 
     async def _authenticate(self) -> bool:
         """Authenticate with qBittorrent WebUI."""
@@ -213,14 +232,19 @@ class DownloadClientService:
         timeout_seconds: int = 15,
         poll_interval_seconds: float = 1.0,
     ) -> Optional[str]:
-        """Poll qBittorrent and return the hash of the added torrent when found."""
+        """Poll qBittorrent and return the hash of the added torrent when found.
+
+        Searches across all categories so that torrents pushed by Prowlarr
+        (which may not set the 'vibarr' category) are still found.
+        """
         normalized_target = self._normalize_title(release_title)
         if not normalized_target:
             return None
 
         elapsed = 0.0
         while elapsed <= timeout_seconds:
-            torrents = await self.get_torrents()
+            # Search all categories — Prowlarr may push the torrent under its own category
+            torrents = await self.get_torrents(all_categories=True)
             for torrent in torrents:
                 normalized_name = self._normalize_title(torrent.name)
                 if normalized_name == normalized_target or normalized_target in normalized_name:
@@ -254,18 +278,25 @@ class DownloadClientService:
         self,
         category: Optional[str] = None,
         filter_state: Optional[str] = None,
+        all_categories: bool = False,
     ) -> List[TorrentInfo]:
-        """Get list of torrents, optionally filtered."""
+        """Get list of torrents, optionally filtered.
+
+        When all_categories=True the category filter is skipped so that
+        torrents added by Prowlarr (potentially in a different category)
+        are also visible.
+        """
         client = await self._get_client()
         if not client:
             return []
 
         try:
             params: Dict[str, Any] = {}
-            if category:
-                params["category"] = category
-            elif cfg.get_setting("qbittorrent_category", "vibarr"):
-                params["category"] = cfg.get_setting("qbittorrent_category", "vibarr")
+            if not all_categories:
+                if category:
+                    params["category"] = category
+                elif cfg.get_setting("qbittorrent_category", "vibarr"):
+                    params["category"] = cfg.get_setting("qbittorrent_category", "vibarr")
             if filter_state:
                 params["filter"] = filter_state
 

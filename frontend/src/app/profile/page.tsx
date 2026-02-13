@@ -1,18 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   User,
   Users,
   Shield,
   Eye,
   Sparkles,
-  Languages,
-  Save,
 } from 'lucide-react'
 import { authApi } from '@/lib/api'
-import toast from 'react-hot-toast'
 import { cn } from '@/lib/utils'
 
 const CLUSTER_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
@@ -28,9 +25,6 @@ const CLUSTER_LABELS: Record<string, { label: string; emoji: string; color: stri
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<'profile' | 'users'>('profile')
-  const [preferredLanguage, setPreferredLanguage] = useState('')
-  const [secondaryLanguages, setSecondaryLanguages] = useState('')
-  const queryClient = useQueryClient()
 
   const { data: profile } = useQuery({
     queryKey: ['profile'],
@@ -47,29 +41,6 @@ export default function ProfilePage() {
       const res = await authApi.listUsers()
       return res.data
     },
-  })
-
-
-  useEffect(() => {
-    if (!profile) return
-    setPreferredLanguage(profile.preferred_language || '')
-    setSecondaryLanguages((profile.secondary_languages || []).join(', '))
-  }, [profile])
-
-  const updateProfileMutation = useMutation({
-    mutationFn: () =>
-      authApi.updateProfile({
-        preferred_language: preferredLanguage.trim() || undefined,
-        secondary_languages: secondaryLanguages
-          .split(',')
-          .map((language) => language.trim().toLowerCase())
-          .filter(Boolean),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profile'] })
-      toast.success('Language preferences saved')
-    },
-    onError: () => toast.error('Failed to save language preferences'),
   })
 
   const tabs = [
@@ -186,46 +157,6 @@ export default function ProfilePage() {
               </div>
             )}
           </div>
-
-          {profile && (
-            <div className="card p-6">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Languages className="w-5 h-5 text-primary-400" />
-                Language Preferences
-              </h3>
-              <p className="text-surface-400 text-sm mb-4">
-                Discovery uses these languages when external providers expose language metadata.
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm text-surface-400 block mb-1">Preferred language</label>
-                  <input
-                    value={preferredLanguage}
-                    onChange={(e) => setPreferredLanguage(e.target.value)}
-                    placeholder="e.g. en, es, fr"
-                    className="w-full bg-surface-900 border border-surface-700 rounded px-3 py-2 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm text-surface-400 block mb-1">Secondary languages</label>
-                  <input
-                    value={secondaryLanguages}
-                    onChange={(e) => setSecondaryLanguages(e.target.value)}
-                    placeholder="Comma-separated, e.g. es, pt-br"
-                    className="w-full bg-surface-900 border border-surface-700 rounded px-3 py-2 text-white"
-                  />
-                </div>
-              </div>
-              <button
-                onClick={() => updateProfileMutation.mutate()}
-                disabled={updateProfileMutation.isPending}
-                className="mt-4 inline-flex items-center gap-2 px-3 py-2 rounded bg-primary-600 hover:bg-primary-500 disabled:opacity-60 text-white"
-              >
-                <Save className="w-4 h-4" />
-                Save language settings
-              </button>
-            </div>
-          )}
 
           {/* Privacy Settings */}
           {profile && (

@@ -365,7 +365,7 @@ function HistoryTab({ downloads, isLoading, onRetry, selectedIds, onToggleSelect
   return (
     <div className="space-y-3">
       {downloads.map((dl) => (
-        <DownloadCard key={dl.id} download={dl} onRetry={dl.status === 'failed' ? () => onRetry(dl.id) : undefined} isSelected={selectedIds.has(dl.id)} onToggleSelection={() => onToggleSelection(dl.id)} />
+        <DownloadCard key={dl.id} download={dl} onRetry={dl.status === 'failed' || dl.status === 'cancelled' ? () => onRetry(dl.id) : undefined} isSelected={selectedIds.has(dl.id)} onToggleSelection={() => onToggleSelection(dl.id)} />
       ))}
     </div>
   )
