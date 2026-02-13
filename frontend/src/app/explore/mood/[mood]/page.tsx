@@ -29,12 +29,12 @@ export default function MoodExplorePage() {
   const mood = params.mood as string
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
   const [broadenLanguage, setBroadenLanguage] = useState(false)
-  const { backendReady } = useBackendReadiness()
+  const { apiUsable } = useBackendReadiness()
 
   const { data, isLoading } = useQuery({
     queryKey: ['discovery', 'mood', mood, broadenLanguage],
     queryFn: () => discoveryApi.getMood(mood, broadenLanguage),
-    enabled: !!mood && backendReady,
+    enabled: !!mood && apiUsable,
   })
 
   const result = data?.data
@@ -110,10 +110,10 @@ export default function MoodExplorePage() {
         </div>
       )}
 
-      {!backendReady || isLoading ? (
+      {!apiUsable || isLoading ? (
         <div className="flex items-center justify-center py-16">
           <LoadingSpinner size="lg" />
-          {!backendReady && <span className="ml-3 text-sm text-surface-400">Starting up discovery services...</span>}
+          {!apiUsable && <span className="ml-3 text-sm text-surface-400">Starting up discovery services...</span>}
         </div>
       ) : tracks.length === 0 && albums.length === 0 ? (
         <EmptyState
