@@ -491,7 +491,12 @@ async def _grab_release_async(
                     grab_path = "prowlarr"
                     prowlarr_result = await prowlarr_service.grab(guid, indexer_id)
                     grab_success = bool(prowlarr_result.get("success"))
-                    download_client_id = prowlarr_result.get("download_id")
+                    # The Prowlarr response id is Prowlarr's internal release record ID,
+                    # NOT a qBittorrent torrent hash. Using it as download_client_id causes
+                    # check_download_status to look for a non-existent torrent hash and fail
+                    # after 3 minutes. Leave download_client_id as None so the QUEUED path
+                    # in check_download_status resolves the real hash via find_torrent_hash().
+                    download_client_id = None
                     logger.info(
                         "Torrent grab attempt result download_id=%s guid=%s indexer_id=%s protocol=%s grab_path=%s success=%s",
                         download_id,

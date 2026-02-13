@@ -17,6 +17,7 @@ from app.models.recommendation import Recommendation
 from app.models.listening_history import ListeningHistory
 from app.services.lastfm import lastfm_service
 from app.services.deezer import deezer_service
+from app.services.spotify import spotify_service
 from app.services.auth import get_current_user
 from app.models.user import User
 
@@ -184,6 +185,24 @@ async def get_discovery_home(
                 item["in_library"] = album.in_library
         release_section_items.append(item)
 
+    # Spotify fallback: if no DB release radar items, use Spotify new releases
+    if not release_section_items and spotify_service.is_available:
+        try:
+            spotify_releases = await spotify_service.get_new_releases(limit=20)
+            for album in spotify_releases:
+                release_section_items.append({
+                    "id": f"spotify:{album.get('id', '')}",
+                    "type": "album",
+                    "title": album.get("name", ""),
+                    "image_url": (album.get("images") or [{}])[0].get("url") if album.get("images") else None,
+                    "artist_name": (album.get("artists") or [{}])[0].get("name") if album.get("artists") else None,
+                    "reason": "New release from Spotify",
+                    "confidence": 0.8,
+                    "source": "spotify",
+                })
+        except Exception as e:
+            logger.warning("Spotify new releases fallback failed: %s", e)
+
     sections.append(
         {
             "id": "release_radar",
@@ -222,6 +241,38 @@ async def get_discovery_home(
                 item["genres"] = artist.genres or []
                 item["in_library"] = artist.in_library
         similar_section_items.append(item)
+
+    # Spotify fallback: if no DB similar artist recs, use Spotify related artists
+    if not similar_section_items and spotify_service.is_available:
+        try:
+            library_artists_result = await db.execute(
+                select(Artist)
+                .where(Artist.in_library == True)
+                .where(Artist.spotify_id.isnot(None))
+                .limit(3)
+            )
+            library_artists = library_artists_result.scalars().all()
+            seen_ids = set()
+            for lib_artist in library_artists:
+                related = await spotify_service.get_related_artists(lib_artist.spotify_id)
+                for a in related[:8]:
+                    sid = a.get("id", "")
+                    if sid and sid not in seen_ids:
+                        seen_ids.add(sid)
+                        similar_section_items.append({
+                            "id": f"spotify:{sid}",
+                            "type": "artist",
+                            "name": a.get("name", ""),
+                            "image_url": (a.get("images") or [{}])[0].get("url") if a.get("images") else None,
+                            "genres": a.get("genres") or [],
+                            "reason": f"Related to {lib_artist.name}",
+                            "confidence": 0.75,
+                            "source": "spotify",
+                        })
+                if len(similar_section_items) >= 20:
+                    break
+        except Exception as e:
+            logger.warning("Spotify related artists fallback failed: %s", e)
 
     sections.append(
         {
@@ -355,6 +406,44 @@ async def get_discovery_home(
                 item["image_url"] = artist.image_url
                 item["in_library"] = artist.in_library
         discover_section_items.append(item)
+
+    # Spotify fallback: if no DB discover weekly items, use Spotify recommendations
+    if not discover_section_items and spotify_service.is_available:
+        try:
+            # Gather top genres from library artists
+            genre_result_dw = await db.execute(
+                select(Artist.genres)
+                .where(Artist.in_library == True)
+                .where(Artist.genres.isnot(None))
+            )
+            dw_genres: list = []
+            for row in genre_result_dw:
+                if row[0]:
+                    dw_genres.extend(row[0])
+            genre_counts_dw = Counter(dw_genres)
+            seed_genres = [g for g, _ in genre_counts_dw.most_common(5)]
+            if seed_genres:
+                # Spotify accepts max 5 seeds total
+                recs = await spotify_service.get_recommendations(
+                    seed_genres=seed_genres[:5], limit=20
+                )
+                for track in recs:
+                    discover_section_items.append({
+                        "id": f"spotify:{track.get('id', '')}",
+                        "type": "track",
+                        "name": track.get("name", ""),
+                        "artist_name": (track.get("artists") or [{}])[0].get("name") if track.get("artists") else None,
+                        "image_url": (
+                            (track.get("album", {}).get("images") or [{}])[0].get("url")
+                            if track.get("album") and track["album"].get("images")
+                            else None
+                        ),
+                        "reason": "Recommended based on your genres",
+                        "confidence": 0.7,
+                        "source": "spotify",
+                    })
+        except Exception as e:
+            logger.warning("Spotify recommendations fallback failed: %s", e)
 
     sections.insert(
         0,
