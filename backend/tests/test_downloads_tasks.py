@@ -428,7 +428,7 @@ async def test_grab_or_import_failures_mark_wishlist_failed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_grab_ack_without_client_id_marks_downloading(monkeypatch):
+async def test_grab_ack_without_client_id_stays_queued(monkeypatch):
     wishlist = WishlistItem(id=21, item_type="album", status=WishlistStatus.FOUND)
     download = downloads.Download(
         id=201,
@@ -458,8 +458,8 @@ async def test_grab_ack_without_client_id_marks_downloading(monkeypatch):
 
     assert grab_result["status"] == "grabbed"
     assert grab_result["client_id"] is None
-    assert download.status == DownloadStatus.DOWNLOADING
-    assert "waiting for download id" in (download.status_message or "").lower()
+    assert download.status == DownloadStatus.QUEUED
+    assert download.status_message == "Queued; waiting for qBittorrent hash"
     assert wishlist.status == WishlistStatus.DOWNLOADING
 
 
@@ -563,7 +563,7 @@ async def test_check_status_marks_missing_qbit_registration_failed_after_timeout
 
     assert payload["updated"] == 1
     assert download.status == DownloadStatus.FAILED
-    assert "did not expose" in (download.status_message or "")
+    assert "hash resolution timed out" in (download.status_message or "")
     assert wishlist.status == WishlistStatus.FAILED
 
 

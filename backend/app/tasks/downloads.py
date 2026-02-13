@@ -553,15 +553,13 @@ async def _grab_release_async(
                         )
 
             if grab_success:
-                download.status = DownloadStatus.DOWNLOADING
                 if download_client_id:
+                    download.status = DownloadStatus.DOWNLOADING
                     download.download_id = str(download_client_id)
                     download.status_message = None
                 else:
-                    if grab_path == "prowlarr":
-                        download.status_message = "Added via Prowlarr handoff; waiting for download ID"
-                    else:
-                        download.status_message = "Added to download client; waiting for download ID"
+                    download.status = DownloadStatus.QUEUED
+                    download.status_message = "Queued; waiting for qBittorrent hash"
 
                 # Record which download client handles this release
                 if protocol == "usenet":
@@ -828,11 +826,11 @@ async def _check_download_status_async():
                         if resolved_hash:
                             download.download_id = resolved_hash
                             download.status = DownloadStatus.DOWNLOADING
-                            download.status_message = "Download accepted by qBittorrent"
+                            download.status_message = None
                         elif download.started_at and datetime.utcnow() - download.started_at > timedelta(minutes=3):
                             download.status = DownloadStatus.FAILED
                             download.completed_at = datetime.utcnow()
-                            download.status_message = "qBittorrent did not expose the queued download"
+                            download.status_message = "qBittorrent hash resolution timed out for queued download"
                             await _sync_wishlist_status(
                                 db,
                                 download,
@@ -841,7 +839,7 @@ async def _check_download_status_async():
                             )
                         else:
                             download.status = DownloadStatus.QUEUED
-                            download.status_message = "Waiting for qBittorrent to register download"
+                            download.status_message = "Queued; waiting for qBittorrent hash"
                         updated += 1
                         await db.commit()
                         continue
