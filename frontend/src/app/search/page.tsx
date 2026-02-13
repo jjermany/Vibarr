@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { useBackendReadiness } from '@/lib/useBackendReadiness'
+import { getSearchErrorDetails } from './searchError'
 
 type SearchType = 'all' | 'artists' | 'albums' | 'tracks'
 type AddBehavior = 'wishlist_only' | 'search_now' | 'auto_download'
@@ -80,11 +81,13 @@ function SearchPageContent() {
   const { backendReady, databaseReady, isLoading: readinessLoading } = useBackendReadiness()
   const searchReady = databaseReady || backendReady
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['search', debouncedQuery, searchType],
     queryFn: () => searchApi.search(debouncedQuery, SEARCH_TYPE_TO_API[searchType]),
     enabled: debouncedQuery.length > 0 && searchReady,
   })
+
+  const searchErrorDetails = getSearchErrorDetails(error)
 
   const results = data?.data || { artists: [], albums: [], tracks: [] }
   const hasResults =
@@ -413,6 +416,37 @@ function SearchPageContent() {
           ) : isLoading ? (
             <div className="flex items-center justify-center py-16">
               <LoadingSpinner size="lg" />
+            </div>
+          ) : isError ? (
+            <div className="max-w-2xl rounded-xl border border-red-500/30 bg-red-500/10 p-5 space-y-3">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-300 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h3 className="text-sm font-semibold text-red-100">Search is unavailable right now</h3>
+                  <p className="text-sm text-red-100/90 mt-1">
+                    {searchErrorDetails.kind === 'network'
+                      ? 'The search request timed out or could not reach the service. This may be temporary.'
+                      : searchErrorDetails.kind === 'auth'
+                        ? 'The search service rejected this request due to permissions. Confirm API credentials and access settings.'
+                        : searchErrorDetails.kind === 'validation'
+                          ? 'The search request was rejected as invalid. Please adjust the query and try again.'
+                          : 'Vibarr could not complete this search request due to a service error.'}
+                  </p>
+                  {searchErrorDetails.detail && (
+                    <p className="text-xs text-red-200/80 mt-2">Details: {searchErrorDetails.detail}</p>
+                  )}
+                  <p className="text-xs text-red-200/80 mt-2">
+                    Retry now, and if this keeps failing, check backend/service status and logs.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => refetch()}
+                className="inline-flex items-center gap-2 rounded-md border border-red-300/40 px-3 py-1.5 text-sm text-red-100 hover:bg-red-400/20 transition-colors"
+              >
+                <Loader2 className="w-4 h-4" />
+                Retry search
+              </button>
             </div>
           ) : !hasResults ? (
             <EmptyState
