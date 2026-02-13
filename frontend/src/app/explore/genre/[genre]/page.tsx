@@ -21,12 +21,12 @@ export default function GenreExplorePage() {
   const genre = decodeURIComponent(params.genre as string)
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
   const [broadenLanguage, setBroadenLanguage] = useState(false)
-  const { backendReady } = useBackendReadiness()
+  const { apiUsable } = useBackendReadiness()
 
   const { data, isLoading } = useQuery({
     queryKey: ['discovery', 'genre', genre, broadenLanguage],
     queryFn: () => discoveryApi.getGenre(genre, undefined, broadenLanguage),
-    enabled: !!genre && backendReady,
+    enabled: !!genre && apiUsable,
   })
 
   const result = data?.data
@@ -101,10 +101,10 @@ export default function GenreExplorePage() {
         </div>
       )}
 
-      {!backendReady || isLoading ? (
+      {!apiUsable || isLoading ? (
         <div className="flex items-center justify-center py-16">
           <LoadingSpinner size="lg" />
-          {!backendReady && <span className="ml-3 text-sm text-surface-400">Starting up discovery services...</span>}
+          {!apiUsable && <span className="ml-3 text-sm text-surface-400">Starting up discovery services...</span>}
         </div>
       ) : artists.length === 0 && albums.length === 0 ? (
         <EmptyState

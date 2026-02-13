@@ -3,6 +3,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { healthApi } from '@/lib/api'
 
+export function isApiUsable(status?: string, checks?: { database?: boolean }) {
+  return checks?.database === true || status === 'ready'
+}
+
 export function useBackendReadiness() {
   const query = useQuery({
     queryKey: ['backend-readiness'],
@@ -13,12 +17,13 @@ export function useBackendReadiness() {
   })
 
   const checks = query.data?.data?.checks
+  const status = query.data?.data?.status
 
   return {
     ...query,
-    backendReady: query.data?.data?.status === 'ready',
+    backendReady: status === 'ready',
     databaseReady: checks?.database === true,
+    apiUsable: isApiUsable(status, checks),
     checks,
   }
 }
-

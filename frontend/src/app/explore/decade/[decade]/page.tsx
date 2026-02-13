@@ -20,12 +20,12 @@ export default function DecadeExplorePage() {
   const params = useParams()
   const decade = parseInt(params.decade as string, 10)
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
-  const { backendReady } = useBackendReadiness()
+  const { apiUsable } = useBackendReadiness()
 
   const { data, isLoading } = useQuery({
     queryKey: ['discovery', 'decade', decade],
     queryFn: () => discoveryApi.getDecade(decade),
-    enabled: !isNaN(decade) && backendReady,
+    enabled: !isNaN(decade) && apiUsable,
   })
 
   const result = data?.data
@@ -83,10 +83,10 @@ export default function DecadeExplorePage() {
         </p>
       </div>
 
-      {!backendReady || isLoading ? (
+      {!apiUsable || isLoading ? (
         <div className="flex items-center justify-center py-16">
           <LoadingSpinner size="lg" />
-          {!backendReady && <span className="ml-3 text-sm text-surface-400">Starting up discovery services...</span>}
+          {!apiUsable && <span className="ml-3 text-sm text-surface-400">Starting up discovery services...</span>}
         </div>
       ) : artists.length === 0 && albums.length === 0 ? (
         <EmptyState
