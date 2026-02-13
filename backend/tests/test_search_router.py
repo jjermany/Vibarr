@@ -403,3 +403,71 @@ async def test_resolve_deezer_playlist_uses_full_track_list(monkeypatch):
 
     assert response.track_count == 3
     assert len(response.tracks) == 3
+
+
+@pytest.mark.asyncio
+async def test_get_preview_ytmusic_album_uses_album_detail_tracks(monkeypatch):
+    async def fake_search_albums(_query: str, limit: int = 1):
+        assert limit == 1
+        return [
+            {
+                "title": "YT Album",
+                "artists": [{"name": "YT Artist"}],
+                "thumbnails": [{"url": "https://img/yt-album.jpg"}],
+                "browseId": "MPREb_123",
+            }
+        ]
+
+    async def fake_get_album(browse_id: str):
+        assert browse_id == "MPREb_123"
+        return {
+            "tracks": [
+                {"title": "Song A", "duration_seconds": 210, "trackNumber": 1},
+                {"title": "Song B", "duration_seconds": 185, "trackNumber": 2},
+                {"title": "Song C", "trackNumber": 3},
+            ]
+        }
+
+    monkeypatch.setattr(search_router.ytmusic_service, "search_albums", fake_search_albums)
+    monkeypatch.setattr(search_router.ytmusic_service, "get_album", fake_get_album)
+
+    response = await search_router.get_preview(
+        type="album", name="YT Album", artist="YT Artist", source="ytmusic", db=None
+    )
+
+    assert response.name == "YT Album"
+    assert response.tracks == [
+        {"title": "Song A", "duration": 210000, "track_number": 1},
+        {"title": "Song B", "duration": 185000, "track_number": 2},
+        {"title": "Song C", "duration": None, "track_number": 3},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_preview_ytmusic_album_without_browse_id_keeps_fallback(monkeypatch):
+    async def fake_search_albums(_query: str, limit: int = 1):
+        assert limit == 1
+        return [
+            {
+                "title": "Fallback YT Album",
+                "artists": [{"name": "Fallback Artist"}],
+                "thumbnails": [{"url": "https://img/fallback.jpg"}],
+            }
+        ]
+
+    async def fake_get_album(_browse_id: str):
+        raise AssertionError("get_album should not be called when browseId is missing")
+
+    monkeypatch.setattr(search_router.ytmusic_service, "search_albums", fake_search_albums)
+    monkeypatch.setattr(search_router.ytmusic_service, "get_album", fake_get_album)
+
+    response = await search_router.get_preview(
+        type="album",
+        name="Fallback YT Album",
+        artist="Fallback Artist",
+        source="ytmusic",
+        db=None,
+    )
+
+    assert response.name == "Fallback YT Album"
+    assert response.tracks == []
