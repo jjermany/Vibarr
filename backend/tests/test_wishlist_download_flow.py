@@ -314,7 +314,7 @@ async def test_grab_and_import_status_propagation_updates_download_and_wishlist(
                 result["status"] == "error"
                 and download.status == DownloadStatus.FAILED
                 and wishlist.status == WishlistStatus.FAILED
-                and "Failed to add release" in (wishlist.notes or "")
+                and "qBittorrent URL add failed" in (wishlist.notes or "")
             ),
         ),
         (

@@ -406,7 +406,7 @@ async def test_grab_or_import_failures_mark_wishlist_failed(monkeypatch):
     assert grab_result["status"] == "error"
     assert download.status == DownloadStatus.FAILED
     assert wishlist.status == WishlistStatus.FAILED
-    assert "Failed to add release" in (wishlist.notes or "")
+    assert "qBittorrent URL add failed" in (wishlist.notes or "")
 
     wishlist.status = WishlistStatus.DOWNLOADING
     download.status = DownloadStatus.IMPORTING
@@ -460,6 +460,83 @@ async def test_grab_ack_without_client_id_marks_downloading(monkeypatch):
     assert grab_result["client_id"] is None
     assert download.status == DownloadStatus.DOWNLOADING
     assert "waiting for download id" in (download.status_message or "").lower()
+    assert wishlist.status == WishlistStatus.DOWNLOADING
+
+
+
+
+@pytest.mark.asyncio
+async def test_grab_torrent_prefers_prowlarr_before_direct_url(monkeypatch):
+    wishlist = WishlistItem(id=24, item_type="album", status=WishlistStatus.FOUND)
+    download = downloads.Download(
+        id=204,
+        artist_name="Artist",
+        album_title="Album",
+        status=DownloadStatus.FOUND,
+        wishlist_id=24,
+    )
+    session = _FakeMultiSession(download=download, wishlist=wishlist)
+
+    monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(downloads, "prowlarr_service", _FakeProwlarrGrabService({"success": True, "download_id": "p-123"}))
+
+    class _ShouldNotBeUsedClient:
+        is_configured = True
+
+        async def add_torrent_url(self, _download_url):
+            raise AssertionError("Direct URL fallback should not run when Prowlarr succeeds")
+
+        async def find_torrent_hash(self, release_title):
+            return None
+
+    monkeypatch.setattr(downloads, "download_client_service", _ShouldNotBeUsedClient())
+
+    result = await downloads._grab_release_async(
+        download_id=204,
+        guid="g-1",
+        indexer_id=11,
+        protocol="torrent",
+        download_url="https://example.com/a.torrent",
+        release_title="Artist - Album",
+    )
+
+    assert result["status"] == "grabbed"
+    assert result["client_id"] == "p-123"
+    assert download.status == DownloadStatus.DOWNLOADING
+    assert download.status_message is None
+    assert wishlist.status == WishlistStatus.DOWNLOADING
+
+
+@pytest.mark.asyncio
+async def test_grab_torrent_falls_back_to_direct_url_after_prowlarr_failure(monkeypatch):
+    wishlist = WishlistItem(id=25, item_type="album", status=WishlistStatus.FOUND)
+    download = downloads.Download(
+        id=205,
+        artist_name="Artist",
+        album_title="Album",
+        status=DownloadStatus.FOUND,
+        wishlist_id=25,
+    )
+    session = _FakeMultiSession(download=download, wishlist=wishlist)
+
+    monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(downloads, "prowlarr_service", _FakeProwlarrGrabService({"success": False, "download_id": None}))
+    monkeypatch.setattr(downloads, "download_client_service", _FakeDirectDownloadClient(add_success=True, torrent_hash="hash-205"))
+
+    result = await downloads._grab_release_async(
+        download_id=205,
+        guid="g-2",
+        indexer_id=12,
+        protocol="torrent",
+        download_url="https://example.com/b.torrent",
+        release_title="Artist - Album",
+    )
+
+    assert result["status"] == "grabbed"
+    assert result["client_id"] == "hash-205"
+    assert download.status == DownloadStatus.DOWNLOADING
     assert wishlist.status == WishlistStatus.DOWNLOADING
 
 
