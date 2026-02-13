@@ -34,6 +34,10 @@ def _contains_any_token(text: str, tokens: List[str]) -> bool:
     return any(token in haystack for token in tokens if len(token) > 2)
 
 
+def _preferred_genre_match(value: str, genre: str) -> bool:
+    return (value or "").strip().lower() == (genre or "").strip().lower()
+
+
 
 
 def _normalized_language(value: Optional[str]) -> Optional[str]:
@@ -547,13 +551,63 @@ async def explore_genre(
                 }
             )
 
-    deezer_tracks = await deezer_service.search_tracks(
-        f'genre:"{genre}"', limit=max(40, min(limit * 3, 150))
-    )
     preferred_languages = _get_user_languages(current_user)
-    genre_tokens = _tokenize(genre)
     language_filtered_count = 0
     language_fallback_count = 0
+    deezer_tracks: List[Dict[str, Any]] = []
+    deezer_genres = await deezer_service.get_genres()
+    deezer_genre = next(
+        (g for g in deezer_genres if _preferred_genre_match(g.get("name", ""), genre)),
+        None,
+    )
+
+    if deezer_genre and deezer_genre.get("id") is not None:
+        deezer_artists = await deezer_service.get_genre_artists(
+            deezer_genre["id"], limit=max(40, min(limit * 2, 120))
+        )
+        for artist in deezer_artists:
+            if not artist.get("id"):
+                continue
+
+            artist_top_tracks = await deezer_service.get_artist_top_tracks(
+                artist["id"], limit=2
+            )
+            if preferred_languages and not broaden_language:
+                has_language_match = any(
+                    (
+                        (metadata_language := _extract_language_metadata(track))
+                        and _language_match(metadata_language, preferred_languages)
+                    )
+                    for track in artist_top_tracks
+                )
+                if not has_language_match:
+                    language_filtered_count += 1
+                    continue
+
+            if not any(str(a.get("id")) == f"deezer:{artist['id']}" for a in artists):
+                artists.append(
+                    {
+                        "id": f"deezer:{artist['id']}",
+                        "name": artist.get("name", ""),
+                        "image_url": artist.get("picture_xl")
+                        or artist.get("picture_big")
+                        or artist.get("picture"),
+                        "genres": [genre],
+                        "in_library": False,
+                        "popularity": artist.get("nb_fan"),
+                        "source": "deezer",
+                    }
+                )
+
+            deezer_tracks.extend(artist_top_tracks)
+            if len(artists) >= limit or len(deezer_tracks) >= max(60, min(limit * 3, 180)):
+                break
+    else:
+        deezer_tracks = await deezer_service.search_tracks(
+            f'genre:"{genre}"', limit=max(40, min(limit * 3, 150))
+        )
+
+    genre_tokens = _tokenize(genre)
     for track in deezer_tracks:
         artist = track.get("artist") or {}
         album = track.get("album") or {}
@@ -573,6 +627,9 @@ async def explore_genre(
                 language_filtered_count += 1
                 continue
         else:
+            if preferred_languages and not broaden_language:
+                language_filtered_count += 1
+                continue
             language_fallback_count += 1
 
         if artist.get("id") and not any(

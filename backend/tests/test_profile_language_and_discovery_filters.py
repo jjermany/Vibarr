@@ -70,3 +70,58 @@ def test_discovery_language_filter_keeps_missing_metadata_and_filters_mismatch()
     assert summary["enabled"] is True
     assert summary["filtered_count"] == 5
     assert summary["fallback_without_metadata"] == 9
+
+
+@pytest.mark.asyncio
+async def test_explore_genre_uses_deezer_top_artists_and_language_filtering(monkeypatch):
+    class _EmptyResult:
+        class _Scalars:
+            def all(self):
+                return []
+
+        def scalars(self):
+            return self._Scalars()
+
+    class _FakeDb:
+        async def execute(self, _query):
+            return _EmptyResult()
+
+    async def fake_get_genres():
+        return [{"id": 132, "name": "Pop"}]
+
+    async def fake_get_genre_artists(genre_id, limit=50):
+        assert genre_id == 132
+        assert limit >= 40
+        return [
+            {"id": 1, "name": "English Artist", "nb_fan": 10},
+            {"id": 2, "name": "French Artist", "nb_fan": 20},
+        ]
+
+    async def fake_get_artist_top_tracks(artist_id, limit=2):
+        assert limit == 2
+        if artist_id == 1:
+            return [{"title": "hit", "language": "en", "artist": {"id": 1, "name": "English Artist"}}]
+        return [{"title": "chanson", "language": "fr", "artist": {"id": 2, "name": "French Artist"}}]
+
+    async def fail_search_tracks(*_args, **_kwargs):
+        raise AssertionError("fallback search should not be used when Deezer genre id resolves")
+
+    monkeypatch.setattr(discovery.deezer_service, "get_genres", fake_get_genres)
+    monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", fake_get_genre_artists)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", fake_get_artist_top_tracks)
+    monkeypatch.setattr(discovery.deezer_service, "search_tracks", fail_search_tracks)
+
+    user = type("U", (), {"preferred_language": "en", "secondary_languages": []})()
+
+    payload = await discovery.explore_genre(
+        genre="pop",
+        sort="popular",
+        limit=10,
+        broaden_language=False,
+        current_user=user,
+        db=_FakeDb(),
+    )
+
+    deezer_artists = [a for a in payload["artists"] if str(a["id"]).startswith("deezer:")]
+    assert [artist["name"] for artist in deezer_artists] == ["English Artist"]
+    assert payload["language_filter"]["filtered_count"] >= 1
