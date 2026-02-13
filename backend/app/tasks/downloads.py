@@ -640,7 +640,7 @@ async def _check_qbittorrent_download(db, download: Download, completed_dir: str
     torrent = await download_client_service.get_torrent(download.download_id)
 
     if not torrent:
-        if download.started_at and datetime.utcnow() - download.started_at > timedelta(minutes=3):
+        if download.started_at and datetime.utcnow() - download.started_at > timedelta(minutes=20):
             download.status = DownloadStatus.FAILED
             download.completed_at = datetime.utcnow()
             download.status_message = "Download missing in qBittorrent after being queued"
@@ -825,14 +825,14 @@ async def _check_download_status_async():
                     if not download.download_id:
                         resolved_hash = await download_client_service.find_torrent_hash(
                             release_title=download.release_title or download.album_title,
-                            timeout_seconds=1,
-                            poll_interval_seconds=0.5,
+                            timeout_seconds=10,
+                            poll_interval_seconds=2.0,
                         )
                         if resolved_hash:
                             download.download_id = resolved_hash
                             download.status = DownloadStatus.DOWNLOADING
                             download.status_message = None
-                        elif download.started_at and datetime.utcnow() - download.started_at > timedelta(minutes=3):
+                        elif download.started_at and datetime.utcnow() - download.started_at > timedelta(minutes=20):
                             download.status = DownloadStatus.FAILED
                             download.completed_at = datetime.utcnow()
                             download.status_message = "qBittorrent hash resolution timed out for queued download"

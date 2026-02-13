@@ -620,6 +620,9 @@ async def explore_genre(
     db: AsyncSession = Depends(get_db),
 ):
     """Explore a specific genre with local + Deezer results."""
+    # Normalise genre slug: URL slugs may use hyphens instead of spaces
+    genre = genre.strip().lower().replace("-", " ")
+
     artist_query = select(Artist).where(Artist.genres.isnot(None))
 
     if sort == "popular":
@@ -674,7 +677,8 @@ async def explore_genre(
     preferred_languages = _get_user_languages(current_user)
     language_filtered_count = 0
     language_fallback_count = 0
-    deezer_tracks: List[Dict[str, Any]] = []
+
+    # ---- Deezer: try the authoritative genre-artists endpoint first ----
     deezer_genres = await deezer_service.get_genres()
     deezer_genre = next(
         (g for g in deezer_genres if _preferred_genre_match(g.get("name", ""), genre)),
@@ -685,6 +689,65 @@ async def explore_genre(
         deezer_genre and deezer_genre.get("id") is not None
     )
 
+    seen_artist_ids: set = {str(a["id"]) for a in artists}
+    seen_album_ids: set = {str(a["id"]) for a in albums}
+
+    def _add_deezer_artist(artist_data: Dict[str, Any]) -> bool:
+        """Add a Deezer artist if not already present. Returns True if added."""
+        aid = artist_data.get("id")
+        if not aid:
+            return False
+        key = f"deezer:{aid}"
+        if key in seen_artist_ids:
+            return False
+        seen_artist_ids.add(key)
+        artists.append(
+            {
+                "id": key,
+                "name": artist_data.get("name", ""),
+                "image_url": (
+                    artist_data.get("picture_xl")
+                    or artist_data.get("picture_big")
+                    or artist_data.get("picture_medium")
+                    or artist_data.get("picture")
+                ),
+                "genres": [genre],
+                "in_library": False,
+                "popularity": artist_data.get("nb_fan") or artist_data.get("fans"),
+                "source": "deezer",
+            }
+        )
+        return True
+
+    def _add_deezer_album(album_data: Dict[str, Any], artist_name: str = "") -> bool:
+        """Add a Deezer album if not already present. Returns True if added."""
+        aid = album_data.get("id")
+        if not aid:
+            return False
+        key = f"deezer:{aid}"
+        if key in seen_album_ids:
+            return False
+        seen_album_ids.add(key)
+        release_year = None
+        rd = album_data.get("release_date") or ""
+        if rd and len(rd) >= 4:
+            try:
+                release_year = int(rd[:4])
+            except ValueError:
+                pass
+        albums.append(
+            {
+                "id": key,
+                "title": album_data.get("title", ""),
+                "artist_name": artist_name,
+                "cover_url": _deezer_cover(album_data),
+                "release_year": release_year,
+                "in_library": False,
+                "source": "deezer",
+            }
+        )
+        return True
+
     if has_authoritative_genre_context:
         deezer_artists = await deezer_service.get_genre_artists(
             deezer_genre["id"], limit=max(40, min(limit * 2, 120))
@@ -693,97 +756,59 @@ async def explore_genre(
             if not artist.get("id"):
                 continue
 
-            artist_top_tracks = await deezer_service.get_artist_top_tracks(
-                artist["id"], limit=2
-            )
+            # Language filtering: check top tracks for language metadata
             if preferred_languages and not broaden_language:
-                has_language_match = any(
-                    (
-                        (metadata_language := _extract_language_metadata(track))
-                        and _language_match(metadata_language, preferred_languages)
+                artist_top_tracks = await deezer_service.get_artist_top_tracks(
+                    artist["id"], limit=2
+                )
+                tracks_with_metadata = [
+                    t for t in artist_top_tracks if _extract_language_metadata(t)
+                ]
+                if tracks_with_metadata:
+                    # We have metadata — filter if none match
+                    has_language_match = any(
+                        _language_match(_extract_language_metadata(t), preferred_languages)
+                        for t in tracks_with_metadata
                     )
-                    for track in artist_top_tracks
-                )
-                if not has_language_match:
-                    language_filtered_count += 1
-                    continue
+                    if not has_language_match:
+                        language_filtered_count += 1
+                        continue
+                # No metadata → keep artist as conservative fallback
 
-            if not any(str(a.get("id")) == f"deezer:{artist['id']}" for a in artists):
-                artists.append(
-                    {
-                        "id": f"deezer:{artist['id']}",
-                        "name": artist.get("name", ""),
-                        "image_url": artist.get("picture_xl")
-                        or artist.get("picture_big")
-                        or artist.get("picture"),
-                        "genres": [genre],
-                        "in_library": False,
-                        "popularity": artist.get("nb_fan"),
-                        "source": "deezer",
-                    }
-                )
-
-            deezer_tracks.extend(artist_top_tracks)
-            if len(artists) >= limit or len(deezer_tracks) >= max(60, min(limit * 3, 180)):
+            _add_deezer_artist(artist)
+            if len(artists) >= limit:
                 break
-    else:
-        deezer_tracks = await deezer_service.search_tracks(
-            f'genre:"{genre}"', limit=max(40, min(limit * 3, 150))
-        )
 
-    for track in deezer_tracks:
-        artist = track.get("artist") or {}
-        album = track.get("album") or {}
-
-        metadata_language = _extract_language_metadata(track)
-        if metadata_language:
-            if preferred_languages and not broaden_language and not _language_match(metadata_language, preferred_languages):
-                language_filtered_count += 1
+    # Supplement with Deezer artist search for more genre-specific content.
+    # This works better than genre:"{name}" track search which Deezer doesn't
+    # treat as a structured filter — it just returns generic popular content.
+    search_limit = max(20, limit - len(artists))
+    if search_limit > 0:
+        search_artists = await deezer_service.search_artists(genre, limit=min(search_limit * 2, 50))
+        for artist in search_artists:
+            if not artist.get("id"):
                 continue
-        else:
-            if preferred_languages and not broaden_language:
-                language_filtered_count += 1
-                continue
-            language_fallback_count += 1
+            _add_deezer_artist(artist)
+            if len(artists) >= limit:
+                break
 
-        if artist.get("id") and not any(
-            str(a.get("id")) == f"deezer:{artist['id']}" for a in artists
-        ):
-            artists.append(
-                {
-                    "id": f"deezer:{artist['id']}",
-                    "name": artist.get("name", ""),
-                    "image_url": artist.get("picture_xl")
-                    or artist.get("picture_big")
-                    or artist.get("picture"),
-                    "genres": [genre],
-                    "in_library": False,
-                    "popularity": track.get("rank"),
-                    "source": "deezer",
-                }
-            )
-
-        if album.get("id") and not any(
-            str(a.get("id")) == f"deezer:{album['id']}" for a in albums
-        ):
-            albums.append(
-                {
-                    "id": f"deezer:{album['id']}",
-                    "title": album.get("title", ""),
-                    "artist_name": artist.get("name", ""),
-                    "cover_url": _deezer_cover(album),
-                    "release_year": (
-                        int(album.get("release_date", "")[:4])
-                        if album.get("release_date")
-                        else None
-                    ),
-                    "in_library": False,
-                    "source": "deezer",
-                }
-            )
-
-        if len(artists) >= limit and len(albums) >= limit:
+    # Fetch albums for Deezer artists that have few/no albums represented
+    deezer_artist_ids = [
+        a["id"].replace("deezer:", "")
+        for a in artists
+        if str(a.get("id", "")).startswith("deezer:")
+    ]
+    for da_id in deezer_artist_ids[:15]:
+        if len(albums) >= limit:
             break
+        artist_albums = await deezer_service.get_artist_albums(da_id, limit=3)
+        artist_name = next(
+            (a["name"] for a in artists if a.get("id") == f"deezer:{da_id}"), ""
+        )
+        for alb in artist_albums:
+            if len(albums) >= limit:
+                break
+            _add_deezer_album(alb, artist_name)
 
     all_genres = Counter()
     for a in artists:

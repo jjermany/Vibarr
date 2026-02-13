@@ -9,3 +9,4 @@ export type Status =
   | 'pending'
   | 'queued'
   | 'importing'
+  | 'cancelled'

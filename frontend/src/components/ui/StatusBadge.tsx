@@ -71,6 +71,11 @@ const statusConfig: Record<
     className: 'bg-red-500/20 text-red-400',
     icon: XCircle,
   },
+  cancelled: {
+    label: 'Cancelled',
+    className: 'bg-surface-700 text-surface-400',
+    icon: XCircle,
+  },
 }
 
 export function StatusBadge({ status, showIcon = true }: StatusBadgeProps) {
