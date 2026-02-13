@@ -254,6 +254,7 @@ export interface ReleaseSearchResult {
   seeders: number
   leechers: number
   download_url?: string
+  protocol?: string
   score: number
 }
 
@@ -269,6 +270,8 @@ export interface GrabRequest {
   release_quality?: string
   seeders?: number
   indexer_name?: string
+  protocol?: string
+  download_url?: string
 }
 
 export interface QualityProfile {

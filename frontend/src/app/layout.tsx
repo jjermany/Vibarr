@@ -30,6 +30,7 @@ export default function RootLayout({
             position="bottom-right"
             toastOptions={{
               className: 'bg-surface-800 text-white border border-surface-700',
+              duration: 5000,
             }}
           />
         </Providers>

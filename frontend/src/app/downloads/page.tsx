@@ -75,6 +75,9 @@ export default function DownloadsPage() {
       await refreshDownloadQueries()
       toast.success('Download cancelled')
     },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Failed to cancel download')
+    },
   })
 
   const retryMutation = useMutation({
@@ -82,6 +85,9 @@ export default function DownloadsPage() {
     onSuccess: async () => {
       await refreshDownloadQueries()
       toast.success('Download retry queued')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Failed to retry download')
     },
   })
 
@@ -120,8 +126,8 @@ export default function DownloadsPage() {
   const searchMutation = useMutation({
     mutationFn: () =>
       downloadsApi.search(searchArtist, searchAlbum, searchFormat || undefined),
-    onError: () => {
-      toast.error('Search failed - is Prowlarr configured?')
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Search failed - is Prowlarr configured?')
     },
   })
 
@@ -138,13 +144,15 @@ export default function DownloadsPage() {
         release_quality: result.quality || undefined,
         seeders: result.seeders,
         indexer_name: result.indexer || undefined,
+        protocol: result.protocol || undefined,
+        download_url: result.download_url || undefined,
       }),
     onSuccess: async () => {
       await refreshDownloadQueries()
       toast.success('Release grabbed - download starting')
     },
-    onError: () => {
-      toast.error('Failed to grab release')
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Failed to grab release')
     },
   })
 
@@ -160,6 +168,9 @@ export default function DownloadsPage() {
       toast.success('Added to download queue')
       setSearchArtist('')
       setSearchAlbum('')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Failed to add to download queue')
     },
   })
 

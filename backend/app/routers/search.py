@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _with_timeout(coro, seconds: float = 8.0):
+    """Run a coroutine with a timeout, returning empty list on timeout."""
+    try:
+        return await asyncio.wait_for(coro, timeout=seconds)
+    except asyncio.TimeoutError:
+        logger.warning("Search source timed out after %.1fs", seconds)
+        return []
+
+
 class SearchResultItem(BaseModel):
     """Individual search result."""
 
@@ -502,7 +511,7 @@ async def search(
 
     search_local = source is None or source == "local"
     search_deezer = source is None or source == "deezer"
-    search_ytmusic = source == "ytmusic"
+    search_ytmusic = source is None or source == "ytmusic"
     search_lastfm = source is None or source == "lastfm"
 
     # Local DB work must remain sequential when sharing the injected DB session.
@@ -513,31 +522,31 @@ async def search(
         if search_local:
             local_tasks.append(("local_artists", _search_local_artists, (db, q, limit)))
         if search_deezer:
-            remote_tasks.append(("deezer_artists", _search_deezer_artists(q, limit)))
+            remote_tasks.append(("deezer_artists", _with_timeout(_search_deezer_artists(q, limit))))
         if search_ytmusic:
-            remote_tasks.append(("ytmusic_artists", _search_ytmusic_artists(q, limit)))
+            remote_tasks.append(("ytmusic_artists", _with_timeout(_search_ytmusic_artists(q, limit))))
         if search_lastfm:
-            remote_tasks.append(("lastfm_artists", _search_lastfm_artists(q, limit)))
+            remote_tasks.append(("lastfm_artists", _with_timeout(_search_lastfm_artists(q, limit))))
 
     if not type or type == "album":
         if search_local:
             local_tasks.append(("local_albums", _search_local_albums, (db, q, limit)))
         if search_deezer:
-            remote_tasks.append(("deezer_albums", _search_deezer_albums(q, limit)))
+            remote_tasks.append(("deezer_albums", _with_timeout(_search_deezer_albums(q, limit))))
         if search_ytmusic:
-            remote_tasks.append(("ytmusic_albums", _search_ytmusic_albums(q, limit)))
+            remote_tasks.append(("ytmusic_albums", _with_timeout(_search_ytmusic_albums(q, limit))))
         if search_lastfm:
-            remote_tasks.append(("lastfm_albums", _search_lastfm_albums(q, limit)))
+            remote_tasks.append(("lastfm_albums", _with_timeout(_search_lastfm_albums(q, limit))))
 
     if not type or type == "track":
         if search_local:
             local_tasks.append(("local_tracks", _search_local_tracks, (db, q, limit)))
         if search_deezer:
-            remote_tasks.append(("deezer_tracks", _search_deezer_tracks(q, limit)))
+            remote_tasks.append(("deezer_tracks", _with_timeout(_search_deezer_tracks(q, limit))))
         if search_ytmusic:
-            remote_tasks.append(("ytmusic_tracks", _search_ytmusic_tracks(q, limit)))
+            remote_tasks.append(("ytmusic_tracks", _with_timeout(_search_ytmusic_tracks(q, limit))))
         if search_lastfm:
-            remote_tasks.append(("lastfm_tracks", _search_lastfm_tracks(q, limit)))
+            remote_tasks.append(("lastfm_tracks", _with_timeout(_search_lastfm_tracks(q, limit))))
 
     # Execute local searches sequentially against the shared DB session.
     local_results = []
@@ -571,15 +580,6 @@ async def search(
             albums.extend(result)
         elif "tracks" in name:
             tracks.extend(result)
-
-    # Tiered fallback: only use YouTube Music if Deezer/local/Last.fm gave no results for a type.
-    if source is None:
-        if (not type or type == "artist") and not artists:
-            artists.extend(await _search_ytmusic_artists(q, limit))
-        if (not type or type == "album") and not albums:
-            albums.extend(await _search_ytmusic_albums(q, limit))
-        if (not type or type == "track") and not tracks:
-            tracks.extend(await _search_ytmusic_tracks(q, limit))
 
     # Deduplicate
     artists = _deduplicate_results(artists)[:limit]
