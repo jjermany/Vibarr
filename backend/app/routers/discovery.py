@@ -816,6 +816,8 @@ async def explore_genre(
                         language_filtered_count += 1
                         continue
                 # No metadata → keep artist as conservative fallback
+                else:
+                    language_fallback_count += 1
 
             _add_deezer_artist(artist)
             if len(artists) >= limit:
