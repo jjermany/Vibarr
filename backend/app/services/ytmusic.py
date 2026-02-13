@@ -72,6 +72,16 @@ class YTMusicService:
             logger.error(f"YTMusic get_artist failed: {exc}")
             return None
 
+    async def get_album(self, browse_id: str) -> Optional[Dict[str, Any]]:
+        """Get YouTube Music album metadata and tracks."""
+        if not self.client:
+            return None
+        try:
+            return await asyncio.to_thread(self.client.get_album, browse_id)
+        except Exception as exc:
+            logger.error(f"YTMusic get_album failed: {exc}")
+            return None
+
 
     async def get_playlist(
         self, playlist_id: str, limit: Optional[int] = None

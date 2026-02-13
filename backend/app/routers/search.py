@@ -826,6 +826,11 @@ async def get_preview(
             matches = await ytmusic_service.search_albums(query, limit=1)
             if matches:
                 first = matches[0]
+                browse_id = first.get("browseId")
+                album_detail = (
+                    await ytmusic_service.get_album(browse_id) if browse_id else None
+                )
+                album_tracks = album_detail.get("tracks", []) if album_detail else []
                 return PreviewResponse(
                     type="album",
                     name=first.get("title", name),
@@ -840,6 +845,18 @@ async def get_preview(
                         else None
                     ),
                     tags=[],
+                    tracks=[
+                        {
+                            "title": track.get("title"),
+                            "duration": (
+                                (track.get("duration_seconds") or 0) * 1000
+                                if track.get("duration_seconds") is not None
+                                else None
+                            ),
+                            "track_number": track.get("trackNumber"),
+                        }
+                        for track in album_tracks
+                    ],
                     source="ytmusic",
                 )
 
