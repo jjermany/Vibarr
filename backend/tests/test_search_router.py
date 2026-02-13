@@ -250,6 +250,75 @@ async def test_get_preview_deezer_artist_album_image_uses_md5_fallback(monkeypat
     )
 
 
+
+@pytest.mark.asyncio
+async def test_get_preview_deezer_album_includes_tracks(monkeypatch):
+    async def fake_search_albums(_query: str, limit: int = 1):
+        assert limit == 1
+        return [
+            {
+                "id": 321,
+                "title": "Preview Album",
+                "artist": {"name": "Preview Artist"},
+                "cover_big": "https://img/album.jpg",
+                "link": "https://deezer.test/album/321",
+            }
+        ]
+
+    async def fake_get_album_tracks(album_id: int, limit: int = 100):
+        assert album_id == 321
+        assert limit == 100
+        return [
+            {"title": "Track 1", "duration": 123, "track_position": 1},
+            {"title": "Track 2", "duration": 245, "track_position": 2},
+        ]
+
+    monkeypatch.setattr(search_router.deezer_service, "search_albums", fake_search_albums)
+    monkeypatch.setattr(
+        search_router.deezer_service, "get_album_tracks", fake_get_album_tracks
+    )
+
+    response = await search_router.get_preview(
+        type="album", name="Preview Album", artist="Preview Artist", source="deezer", db=None
+    )
+
+    assert response.name == "Preview Album"
+    assert response.tracks
+    assert response.tracks[0] == {
+        "title": "Track 1",
+        "duration": 123000,
+        "track_number": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_preview_deezer_album_falls_back_to_empty_tracks_on_fetch_failure(monkeypatch):
+    async def fake_search_albums(_query: str, limit: int = 1):
+        return [
+            {
+                "id": 654,
+                "title": "Fallback Album",
+                "artist": {"name": "Fallback Artist"},
+            }
+        ]
+
+    async def fake_get_album_tracks(_album_id: int, limit: int = 100):
+        assert limit == 100
+        return []
+
+    monkeypatch.setattr(search_router.deezer_service, "search_albums", fake_search_albums)
+    monkeypatch.setattr(
+        search_router.deezer_service, "get_album_tracks", fake_get_album_tracks
+    )
+
+    response = await search_router.get_preview(
+        type="album", name="Fallback Album", artist="Fallback Artist", source="deezer", db=None
+    )
+
+    assert response.name == "Fallback Album"
+    assert response.tracks == []
+
+
 @pytest.mark.asyncio
 async def test_resolve_youtube_playlist_fetches_all_tracks(monkeypatch):
     monkeypatch.setattr(search_router.ytmusic_service, "_client", object())

@@ -747,6 +747,10 @@ async def get_preview(
             matches = await deezer_service.search_albums(query, limit=1)
             if matches:
                 album_data = matches[0]
+                album_id = album_data.get("id")
+                album_tracks = []
+                if album_id:
+                    album_tracks = await deezer_service.get_album_tracks(album_id, limit=100)
                 return PreviewResponse(
                     type="album",
                     name=album_data.get("title", name),
@@ -759,7 +763,14 @@ async def get_preview(
                     or album_data.get("cover_big")
                     or album_data.get("cover"),
                     tags=[],
-                    tracks=[],
+                    tracks=[
+                        {
+                            "title": track.get("title"),
+                            "duration": (track.get("duration") or 0) * 1000,
+                            "track_number": track.get("track_position"),
+                        }
+                        for track in album_tracks
+                    ],
                     source="deezer",
                     url=album_data.get("link"),
                 )

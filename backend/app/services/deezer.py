@@ -147,6 +147,22 @@ class DeezerService:
             )
             return []
 
+    async def get_album_tracks(
+        self, album_id: int | str, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Get tracks for an album."""
+        try:
+            payload = await self._get(f"/album/{album_id}/tracks", {"limit": limit})
+            return payload.get("data", []) or []
+        except Exception as exc:
+            self._log_failure(
+                source="deezer track",
+                endpoint_type="get_album_tracks",
+                identifier=album_id,
+                exc=exc,
+            )
+            return []
+
     async def get_related_artists(
         self, artist_id: int | str, limit: int = 20
     ) -> List[Dict[str, Any]]:
