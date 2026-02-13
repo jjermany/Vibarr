@@ -35,6 +35,48 @@ def _contains_any_token(text: str, tokens: List[str]) -> bool:
     return any(token in haystack for token in tokens if len(token) > 2)
 
 
+def _artist_name_relevance(name: str, genre: str) -> bool:
+    """Require a strong name/token overlap for fallback genre artist search."""
+    normalized_name = (name or "").strip().lower()
+    normalized_genre = (genre or "").strip().lower()
+    if not normalized_name or not normalized_genre:
+        return False
+    if normalized_genre in normalized_name:
+        return True
+
+    genre_tokens = [token for token in _tokenize(normalized_genre) if len(token) > 2]
+    if not genre_tokens:
+        return False
+
+    name_tokens = set(_tokenize(normalized_name))
+    matched_tokens = [token for token in genre_tokens if token in name_tokens]
+
+    if len(genre_tokens) == 1:
+        return bool(matched_tokens)
+    return len(matched_tokens) >= 2
+
+
+def _track_implies_genre_affinity(track: Dict[str, Any], genre: str) -> bool:
+    """Use lightweight track metadata to infer fallback genre affinity."""
+    genre_tokens = [token for token in _tokenize(genre) if len(token) > 2]
+    if not genre_tokens:
+        return False
+
+    metadata_blob = " ".join(
+        [
+            track.get("title", ""),
+            track.get("title_short", ""),
+            (track.get("album") or {}).get("title", ""),
+            (track.get("artist") or {}).get("name", ""),
+        ]
+    ).lower()
+
+    if genre.lower() in metadata_blob:
+        return True
+    matched = [token for token in genre_tokens if token in metadata_blob]
+    return len(matched) >= min(2, len(genre_tokens))
+
+
 # Maps common UI genre names to Deezer genre name variants
 _GENRE_ALIASES: Dict[str, List[str]] = {
     "hip hop": ["rap/hip hop", "rap", "hip-hop", "hip hop/rap"],
@@ -779,15 +821,30 @@ async def explore_genre(
             if len(artists) >= limit:
                 break
 
-    # Supplement with Deezer artist search for more genre-specific content.
-    # This works better than genre:"{name}" track search which Deezer doesn't
-    # treat as a structured filter — it just returns generic popular content.
+    # Supplement with Deezer artist search only when authoritative genre lookup is
+    # unavailable, or when caller explicitly asks for broadened discovery behavior.
+    should_run_search_fallback = (not has_authoritative_genre_context) or broaden_language
     search_limit = max(20, limit - len(artists))
-    if search_limit > 0:
-        search_artists = await deezer_service.search_artists(genre, limit=min(search_limit * 2, 50))
+    if should_run_search_fallback and search_limit > 0:
+        search_artists = await deezer_service.search_artists(
+            genre, limit=min(search_limit * 2, 50)
+        )
         for artist in search_artists:
-            if not artist.get("id"):
+            artist_id = artist.get("id")
+            if not artist_id:
                 continue
+
+            strong_name_match = _artist_name_relevance(artist.get("name", ""), genre)
+            metadata_affinity = False
+            if not strong_name_match:
+                top_tracks = await deezer_service.get_artist_top_tracks(artist_id, limit=3)
+                metadata_affinity = any(
+                    _track_implies_genre_affinity(track, genre) for track in top_tracks
+                )
+
+            if not (strong_name_match or metadata_affinity):
+                continue
+
             _add_deezer_artist(artist)
             if len(artists) >= limit:
                 break

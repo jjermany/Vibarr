@@ -107,13 +107,13 @@ async def test_explore_genre_uses_deezer_top_artists_and_language_filtering(monk
             return [{"title": "hit", "language": "en", "artist": {"id": 1, "name": "English Artist"}}]
         return [{"title": "chanson", "language": "fr", "artist": {"id": 2, "name": "French Artist"}}]
 
-    async def fail_search_tracks(*_args, **_kwargs):
-        raise AssertionError("fallback search should not be used when Deezer genre id resolves")
+    async def fake_search_artists(*_args, **_kwargs):
+        raise AssertionError("search fallback should not run when genre id resolves")
 
     monkeypatch.setattr(discovery.deezer_service, "get_genres", fake_get_genres)
     monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", fake_get_genre_artists)
     monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", fake_get_artist_top_tracks)
-    monkeypatch.setattr(discovery.deezer_service, "search_tracks", fail_search_tracks)
+    monkeypatch.setattr(discovery.deezer_service, "search_artists", fake_search_artists)
 
     user = type("U", (), {"preferred_language": "en", "secondary_languages": []})()
 
@@ -165,13 +165,14 @@ async def test_explore_genre_populates_albums_from_genre_artists_without_genre_t
             }
         ]
 
-    async def fail_search_tracks(*_args, **_kwargs):
-        raise AssertionError("fallback search should not be used when Deezer genre id resolves")
+    async def fake_get_artist_albums(artist_id, limit=3):
+        assert artist_id == "99"
+        return [{"id": 8801, "title": "Neon Nights", "cover": "cover-url"}]
 
     monkeypatch.setattr(discovery.deezer_service, "get_genres", fake_get_genres)
     monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", fake_get_genre_artists)
     monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", fake_get_artist_top_tracks)
-    monkeypatch.setattr(discovery.deezer_service, "search_tracks", fail_search_tracks)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_albums", fake_get_artist_albums)
 
     user = type("U", (), {"preferred_language": "en", "secondary_languages": []})()
 
@@ -224,9 +225,14 @@ async def test_explore_genre_endpoint_returns_relevant_artists_and_albums_withou
             }
         ]
 
+    async def fake_get_artist_albums(artist_id, limit=3):
+        assert artist_id == "991"
+        return [{"id": 8801, "title": "City Lights", "cover": "cover-url"}]
+
     monkeypatch.setattr(discovery.deezer_service, "get_genres", fake_get_genres)
     monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", fake_get_genre_artists)
     monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", fake_get_artist_top_tracks)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_albums", fake_get_artist_albums)
 
     app = FastAPI()
     app.include_router(discovery.router, prefix="/api/discovery")
@@ -323,9 +329,14 @@ async def test_search_and_genre_endpoints_have_bounded_behavior_with_delayed_pro
             }
         ]
 
+    async def delayed_get_artist_albums(_artist_id, limit=3):
+        await asyncio.sleep(0.05)
+        return [{"id": 33, "title": "Bounded Album"}]
+
     monkeypatch.setattr(discovery.deezer_service, "get_genres", delayed_get_genres)
     monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", delayed_get_genre_artists)
     monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", delayed_get_artist_top_tracks)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_albums", delayed_get_artist_albums)
 
     discovery_app = FastAPI()
     discovery_app.include_router(discovery.router, prefix="/api/discovery")
@@ -346,3 +357,102 @@ async def test_search_and_genre_endpoints_have_bounded_behavior_with_delayed_pro
     assert any(a["name"] == "Bounded Artist" for a in payload["artists"])
     assert any(a["title"] == "Bounded Album" for a in payload["albums"])
     assert elapsed < 0.4
+
+
+@pytest.mark.asyncio
+async def test_explore_genre_resolved_id_filters_unrelated_search_fallback(monkeypatch):
+    class _EmptyResult:
+        class _Scalars:
+            def all(self):
+                return []
+
+        def scalars(self):
+            return self._Scalars()
+
+    class _FakeDb:
+        async def execute(self, _query):
+            return _EmptyResult()
+
+    async def fake_get_genres():
+        return [{"id": 132, "name": "Pop"}]
+
+    async def fake_get_genre_artists(genre_id, limit=50):
+        assert genre_id == 132
+        return [{"id": 991, "name": "Moonline", "nb_fan": 5000}]
+
+    async def fake_search_artists(_query, limit=20):
+        assert limit >= 20
+        return [{"id": 77, "name": "Completely Unrelated Artist", "nb_fan": 1}]
+
+    async def fake_get_artist_top_tracks(_artist_id, limit=3):
+        assert limit == 3
+        return [{"title": "Random Song", "album": {"title": "Greatest Hits"}}]
+
+    monkeypatch.setattr(discovery.deezer_service, "get_genres", fake_get_genres)
+    monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", fake_get_genre_artists)
+    monkeypatch.setattr(discovery.deezer_service, "search_artists", fake_search_artists)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", fake_get_artist_top_tracks)
+
+    payload = await discovery.explore_genre(
+        genre="pop",
+        sort="popular",
+        limit=10,
+        broaden_language=True,
+        current_user=type("U", (), {"preferred_language": "en", "secondary_languages": []})(),
+        db=_FakeDb(),
+    )
+
+    deezer_artists = [a for a in payload["artists"] if str(a["id"]).startswith("deezer:")]
+    assert any(artist["name"] == "Moonline" for artist in deezer_artists)
+    assert all(artist["name"] != "Completely Unrelated Artist" for artist in deezer_artists)
+
+
+@pytest.mark.asyncio
+async def test_explore_genre_unresolved_id_uses_search_fallback_with_bounded_results(monkeypatch):
+    class _EmptyResult:
+        class _Scalars:
+            def all(self):
+                return []
+
+        def scalars(self):
+            return self._Scalars()
+
+    class _FakeDb:
+        async def execute(self, _query):
+            return _EmptyResult()
+
+    async def fake_get_genres():
+        return [{"id": 132, "name": "Pop"}]
+
+    async def fake_search_artists(_query, limit=20):
+        assert limit >= 20
+        return [
+            {"id": 321, "name": "Ambient Flow", "nb_fan": 400},
+            {"id": 654, "name": "Noise Unit", "nb_fan": 200},
+        ]
+
+    async def fake_get_artist_top_tracks(_artist_id, limit=3):
+        assert limit == 3
+        return [{"title": "General Track", "album": {"title": "General Album"}}]
+
+    async def fail_get_genre_artists(*_args, **_kwargs):
+        raise AssertionError("genre artists should not be called when no genre id resolves")
+
+    monkeypatch.setattr(discovery.deezer_service, "get_genres", fake_get_genres)
+    monkeypatch.setattr(discovery.deezer_service, "search_artists", fake_search_artists)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", fake_get_artist_top_tracks)
+    monkeypatch.setattr(discovery.deezer_service, "get_genre_artists", fail_get_genre_artists)
+
+    payload = await discovery.explore_genre(
+        genre="ambient",
+        sort="popular",
+        limit=5,
+        broaden_language=False,
+        current_user=type("U", (), {"preferred_language": None, "secondary_languages": []})(),
+        db=_FakeDb(),
+    )
+
+    deezer_artists = [a for a in payload["artists"] if str(a["id"]).startswith("deezer:")]
+    assert deezer_artists
+    assert any(artist["name"] == "Ambient Flow" for artist in deezer_artists)
+    assert len(deezer_artists) <= 5
