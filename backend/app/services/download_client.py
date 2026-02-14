@@ -136,11 +136,17 @@ class DownloadClientService:
                     "password": cfg.get_setting("qbittorrent_password"),
                 },
             )
-            if response.status_code == 200 and response.text == "Ok.":
+            response_text = response.text or ""
+            normalized_text = response_text.strip().lower()
+            if response.status_code == 200 and normalized_text.startswith("ok"):
                 self._authenticated = True
                 return True
             else:
-                logger.error(f"qBittorrent auth failed: {response.text}")
+                logger.error(
+                    "qBittorrent auth failed (status=%s, body=%r)",
+                    response.status_code,
+                    response_text[:120],
+                )
                 return False
         except Exception as e:
             logger.error(f"qBittorrent auth error: {e}")
@@ -212,10 +218,16 @@ class DownloadClientService:
                 data["tags"] = ",".join(tags)
 
             response = await client.post("/api/v2/torrents/add", data=data)
-            if response.status_code == 200 and response.text == "Ok.":
+            response_text = response.text or ""
+            normalized_text = response_text.strip().lower()
+            if response.status_code == 200 and normalized_text.startswith("ok"):
                 return True
             else:
-                logger.error(f"Failed to add torrent: {response.text}")
+                logger.error(
+                    "Failed to add torrent (status=%s, body=%r)",
+                    response.status_code,
+                    response_text[:120],
+                )
                 return False
         except Exception as e:
             logger.error(f"Error adding torrent: {e}")
