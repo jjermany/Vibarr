@@ -955,13 +955,16 @@ async def _import_completed_download_async(download_id: int):
         if not download:
             return {"status": "error", "message": "Download not found"}
 
-        if not download.download_path:
+        source_path = download.download_path
+
+        if not source_path:
             # Try to get path from the appropriate download client
             if download.download_id:
                 if download.download_client == "sabnzbd" and sabnzbd_service.is_configured:
                     nzb = await sabnzbd_service.get_download(download.download_id)
                     if nzb and nzb.storage:
                         download.download_path = nzb.storage
+                        source_path = download.download_path
                         await db.commit()
                 elif download_client_service.is_configured:
                     torrent = await download_client_service.get_torrent(
@@ -969,9 +972,10 @@ async def _import_completed_download_async(download_id: int):
                     )
                     if torrent:
                         download.download_path = torrent.content_path or torrent.save_path
+                        source_path = download.download_path
                         await db.commit()
 
-            if not download.download_path:
+            if not source_path:
                 download.status = DownloadStatus.FAILED
                 download.status_message = "No download path available for import"
                 await db.commit()
@@ -991,7 +995,7 @@ async def _import_completed_download_async(download_id: int):
             if beets_service.is_available:
                 # Run beets import
                 import_result = await beets_service.import_directory(
-                    source_path=download.download_path,
+                    source_path=source_path,
                     artist_hint=download.artist_name,
                     album_hint=download.album_title,
                 )

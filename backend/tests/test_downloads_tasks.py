@@ -813,3 +813,39 @@ def test_shutdown_task_loop_closes_resources(monkeypatch):
     assert events == ["resources_closed", "loop_closed"]
     assert fake_loop.closed is True
     assert downloads._task_loop is None
+
+
+@pytest.mark.asyncio
+async def test_import_task_uses_existing_manual_path_without_client_lookup(monkeypatch):
+    download = downloads.Download(
+        id=333,
+        artist_name="Artist",
+        album_title="Album",
+        status=DownloadStatus.COMPLETED,
+        download_path="/manual/path",
+        download_id="hash-333",
+    )
+    session = _FakeMultiSession(download=download, wishlist=None)
+    imported = {}
+
+    class _CaptureBeetsService:
+        is_available = True
+
+        async def import_directory(self, **kwargs):
+            imported.update(kwargs)
+            return _ImportResult(success=True)
+
+    class _ClientThatShouldNotBeCalled:
+        is_configured = True
+
+        async def get_torrent(self, _download_id):
+            raise AssertionError("get_torrent should not be called when download_path is already set")
+
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(downloads, "beets_service", _CaptureBeetsService())
+    monkeypatch.setattr(downloads, "download_client_service", _ClientThatShouldNotBeCalled())
+
+    result = await downloads._import_completed_download_async(download_id=333)
+
+    assert result["status"] == "completed"
+    assert imported["source_path"] == "/manual/path"
