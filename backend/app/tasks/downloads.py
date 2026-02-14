@@ -1,6 +1,7 @@
 """Download management tasks."""
 
 import logging
+import os
 from datetime import datetime, timedelta
 import asyncio
 
@@ -640,6 +641,38 @@ async def _check_qbittorrent_download(db, download: Download, completed_dir: str
     torrent = await download_client_service.get_torrent(download.download_id)
 
     if not torrent:
+        # The torrent may have completed and been auto-removed from qBittorrent.
+        # Check whether the content already exists on disk before giving up.
+        existing_path = download.download_path
+        if not existing_path and completed_dir and (download.release_title or download.album_title):
+            title_key = (download.release_title or download.album_title or "").lower()[:30]
+            try:
+                for entry in os.listdir(completed_dir):
+                    if title_key and title_key[:20] in entry.lower():
+                        existing_path = os.path.join(completed_dir, entry)
+                        break
+            except OSError:
+                pass
+
+        if existing_path and os.path.exists(existing_path):
+            logger.info(
+                f"Torrent {download.download_id} not in qBittorrent but content found at "
+                f"{existing_path} — marking download {download.id} as completed"
+            )
+            download.progress = 100.0
+            download.completed_at = datetime.utcnow()
+            download.download_path = existing_path
+            download.download_speed = None
+            download.eta_seconds = None
+            if cfg.get_bool("beets_enabled") and cfg.get_bool("beets_auto_import", True):
+                import_completed_download.delay(download_id=download.id)
+                download.status = DownloadStatus.IMPORTING
+                await _sync_wishlist_status(db, download, WishlistStatus.IMPORTING)
+            else:
+                download.status = DownloadStatus.COMPLETED
+                await _sync_wishlist_status(db, download, WishlistStatus.DOWNLOADED)
+            return True
+
         if download.started_at and datetime.utcnow() - download.started_at > timedelta(minutes=20):
             download.status = DownloadStatus.FAILED
             download.completed_at = datetime.utcnow()
@@ -830,8 +863,9 @@ async def _check_download_status_async():
                         )
                         if resolved_hash:
                             download.download_id = resolved_hash
-                            download.status = DownloadStatus.DOWNLOADING
                             download.status_message = None
+                            # Fall through to _check_qbittorrent_download so progress and
+                            # completion are captured in the same polling cycle.
                         elif download.started_at and datetime.utcnow() - download.started_at > timedelta(minutes=20):
                             download.status = DownloadStatus.FAILED
                             download.completed_at = datetime.utcnow()
@@ -842,12 +876,15 @@ async def _check_download_status_async():
                                 WishlistStatus.FAILED,
                                 message=download.status_message,
                             )
+                            updated += 1
+                            await db.commit()
+                            continue
                         else:
                             download.status = DownloadStatus.QUEUED
                             download.status_message = "Queued; waiting for qBittorrent hash"
-                        updated += 1
-                        await db.commit()
-                        continue
+                            updated += 1
+                            await db.commit()
+                            continue
                     was_completed = await _check_qbittorrent_download(db, download, completed_dir)
                 else:
                     logger.warning(
