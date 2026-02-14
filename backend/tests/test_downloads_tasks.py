@@ -303,7 +303,7 @@ class _FakeDirectDownloadClient:
         self.add_calls += 1
         return self._add_success
 
-    async def find_torrent_hash(self, release_title):
+    async def find_torrent_hash(self, release_title, timeout_seconds=1, poll_interval_seconds=0.5):
         self.find_hash_calls += 1
         return self._torrent_hash
 
@@ -325,6 +325,25 @@ class _FakeProwlarrGrabService:
         if isinstance(self._grab_result, dict):
             return self._grab_result
         return {"success": bool(self._grab_result), "download_id": self._grab_result}
+
+
+class _FakeDownloadClientWithSequence:
+    def __init__(self, hashes, add_success=True, is_configured=True):
+        self._hashes = list(hashes)
+        self._add_success = add_success
+        self.is_configured = is_configured
+        self.find_hash_calls = 0
+        self.add_calls = 0
+
+    async def add_torrent_url(self, _download_url):
+        self.add_calls += 1
+        return self._add_success
+
+    async def find_torrent_hash(self, release_title, timeout_seconds=1, poll_interval_seconds=0.5):
+        self.find_hash_calls += 1
+        if self._hashes:
+            return self._hashes.pop(0)
+        return None
 
 
 @pytest.mark.asyncio
@@ -460,7 +479,7 @@ async def test_grab_ack_without_client_id_stays_queued(monkeypatch):
     assert grab_result["status"] == "grabbed"
     assert grab_result["client_id"] is None
     assert download.status == DownloadStatus.QUEUED
-    assert download.status_message == "Queued; waiting for qBittorrent hash"
+    assert download.status_message == "Queued via direct URL; waiting for qBittorrent hash"
     assert fake_client.add_calls == 1
     assert fake_client.find_hash_calls == 1
     assert wishlist.status == WishlistStatus.DOWNLOADING
@@ -490,8 +509,8 @@ async def test_grab_torrent_prefers_prowlarr_before_direct_url(monkeypatch):
         async def add_torrent_url(self, _download_url):
             raise AssertionError("Direct URL fallback should not run when Prowlarr succeeds")
 
-        async def find_torrent_hash(self, release_title):
-            return None
+        async def find_torrent_hash(self, release_title, timeout_seconds=1, poll_interval_seconds=0.5):
+            return "hash-from-prowlarr"
 
     monkeypatch.setattr(downloads, "download_client_service", _ShouldNotBeUsedClient())
 
@@ -505,9 +524,9 @@ async def test_grab_torrent_prefers_prowlarr_before_direct_url(monkeypatch):
     )
 
     assert result["status"] == "grabbed"
-    assert result["client_id"] is None
-    assert download.status == DownloadStatus.QUEUED
-    assert download.status_message == "Queued; waiting for qBittorrent hash"
+    assert result["client_id"] == "hash-from-prowlarr"
+    assert download.status == DownloadStatus.DOWNLOADING
+    assert download.status_message == "Queued via Prowlarr"
     assert wishlist.status == WishlistStatus.DOWNLOADING
 
 
@@ -540,7 +559,77 @@ async def test_grab_torrent_falls_back_to_direct_url_after_prowlarr_failure(monk
     assert result["status"] == "grabbed"
     assert result["client_id"] == "hash-205"
     assert download.status == DownloadStatus.DOWNLOADING
+    assert download.status_message == "Queued via direct URL"
     assert wishlist.status == WishlistStatus.DOWNLOADING
+
+
+@pytest.mark.asyncio
+async def test_grab_torrent_falls_back_to_direct_url_when_prowlarr_has_no_hash(monkeypatch):
+    wishlist = WishlistItem(id=26, item_type="album", status=WishlistStatus.FOUND)
+    download = downloads.Download(
+        id=206,
+        artist_name="Artist",
+        album_title="Album",
+        status=DownloadStatus.FOUND,
+        wishlist_id=26,
+    )
+    session = _FakeMultiSession(download=download, wishlist=wishlist)
+
+    monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(downloads, "prowlarr_service", _FakeProwlarrGrabService({"success": True, "download_id": "p-206"}))
+    monkeypatch.setattr(
+        downloads,
+        "download_client_service",
+        _FakeDownloadClientWithSequence([None, "hash-fallback-206"], add_success=True),
+    )
+
+    result = await downloads._grab_release_async(
+        download_id=206,
+        guid="g-206",
+        indexer_id=18,
+        protocol="torrent",
+        download_url="https://example.com/c.torrent",
+        release_title="Artist - Album",
+    )
+
+    assert result["status"] == "grabbed"
+    assert result["client_id"] == "hash-fallback-206"
+    assert download.status == DownloadStatus.DOWNLOADING
+    assert download.status_message == "Queued via direct URL"
+    assert wishlist.status == WishlistStatus.DOWNLOADING
+
+
+@pytest.mark.asyncio
+async def test_grab_torrent_prowlarr_no_hash_and_no_usable_fallback_marks_failed(monkeypatch):
+    wishlist = WishlistItem(id=27, item_type="album", status=WishlistStatus.FOUND)
+    download = downloads.Download(
+        id=207,
+        artist_name="Artist",
+        album_title="Album",
+        status=DownloadStatus.FOUND,
+        wishlist_id=27,
+    )
+    session = _FakeMultiSession(download=download, wishlist=wishlist)
+
+    monkeypatch.setattr(downloads.cfg, "ensure_cache", _noop_async)
+    monkeypatch.setattr(downloads, "AsyncSessionLocal", lambda: _SessionFactory(session))
+    monkeypatch.setattr(downloads, "prowlarr_service", _FakeProwlarrGrabService({"success": True, "download_id": "p-207"}))
+    monkeypatch.setattr(downloads, "download_client_service", _FakeDownloadClientWithSequence([None], add_success=False))
+
+    result = await downloads._grab_release_async(
+        download_id=207,
+        guid="g-207",
+        indexer_id=19,
+        protocol="torrent",
+        download_url="https://example.com/d.torrent",
+        release_title="Artist - Album",
+    )
+
+    assert result["status"] == "error"
+    assert download.status == DownloadStatus.FAILED
+    assert download.status_message == "Prowlarr accepted but no torrent found; fallback failed"
+    assert wishlist.status == WishlistStatus.FAILED
 
 
 @pytest.mark.asyncio
@@ -552,7 +641,7 @@ async def test_check_status_marks_missing_qbit_registration_failed_after_timeout
         album_title="Album",
         release_title="Artist - Album",
         status=DownloadStatus.DOWNLOADING,
-        started_at=downloads.datetime.utcnow() - downloads.timedelta(minutes=4),
+        started_at=downloads.datetime.utcnow() - downloads.timedelta(minutes=25),
         wishlist_id=23,
         download_client="qbittorrent",
     )
@@ -590,8 +679,8 @@ async def test_check_status_remains_queued_until_hash_timeout_window_expires(mon
         values = [
             base_time + downloads.timedelta(minutes=1),
             base_time + downloads.timedelta(minutes=2),
-            base_time + downloads.timedelta(minutes=4, seconds=1),
-            base_time + downloads.timedelta(minutes=4, seconds=1),
+            base_time + downloads.timedelta(minutes=21, seconds=1),
+            base_time + downloads.timedelta(minutes=21, seconds=1),
         ]
 
         @classmethod

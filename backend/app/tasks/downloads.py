@@ -447,6 +447,11 @@ async def _grab_release_async(
             grab_success = False
             download_client_id = None
             grab_path = "direct_url"
+            used_prowlarr = False
+            prowlarr_accepted_without_hash = False
+            fallback_succeeded = False
+            fallback_error = None
+            status_message = None
 
             if protocol == "usenet":
                 if not download_url:
@@ -489,15 +494,10 @@ async def _grab_release_async(
                 )
 
                 if guid and indexer_id and prowlarr_service.is_available:
+                    used_prowlarr = True
                     grab_path = "prowlarr"
                     prowlarr_result = await prowlarr_service.grab(guid, indexer_id)
                     grab_success = bool(prowlarr_result.get("success"))
-                    # The Prowlarr response id is Prowlarr's internal release record ID,
-                    # NOT a qBittorrent torrent hash. Using it as download_client_id causes
-                    # check_download_status to look for a non-existent torrent hash and fail
-                    # after 3 minutes. Leave download_client_id as None so the QUEUED path
-                    # in check_download_status resolves the real hash via find_torrent_hash().
-                    download_client_id = None
                     logger.info(
                         "Torrent grab attempt result download_id=%s guid=%s indexer_id=%s protocol=%s grab_path=%s success=%s",
                         download_id,
@@ -507,6 +507,20 @@ async def _grab_release_async(
                         grab_path,
                         grab_success,
                     )
+                    if grab_success:
+                        status_message = "Queued via Prowlarr"
+                        if download_client_service.is_configured:
+                            download_client_id = await download_client_service.find_torrent_hash(
+                                release_title=release_title or download.release_title or "",
+                                timeout_seconds=8,
+                                poll_interval_seconds=1,
+                            )
+                        if download_client_id:
+                            grab_success = True
+                        else:
+                            prowlarr_accepted_without_hash = True
+                            grab_success = False
+
                     if not grab_success:
                         logger.warning(
                             "Prowlarr grab failed, falling back to direct URL download_id=%s guid=%s indexer_id=%s protocol=%s grab_path=%s",
@@ -520,52 +534,41 @@ async def _grab_release_async(
                 if not grab_success:
                     grab_path = "direct_url"
                     if not download_client_service.is_configured:
-                        download.status = DownloadStatus.FAILED
-                        download.status_message = "qBittorrent not configured"
-                        await db.commit()
-                        await _sync_wishlist_status(
-                            db,
-                            download,
-                            WishlistStatus.FAILED,
-                            message=download.status_message,
+                        fallback_error = "qBittorrent not configured"
+                    elif not download_url:
+                        fallback_error = "qBittorrent URL add failed: missing download URL"
+                    else:
+                        grab_success = await download_client_service.add_torrent_url(download_url)
+                        logger.info(
+                            "Torrent direct URL add result download_id=%s guid=%s indexer_id=%s protocol=%s grab_path=%s success=%s",
+                            download_id,
+                            guid,
+                            indexer_id,
+                            protocol,
+                            grab_path,
+                            grab_success,
                         )
-                        return {"status": "error", "message": download.status_message}
+                        if grab_success:
+                            fallback_succeeded = True
+                            status_message = "Queued via direct URL"
+                            download_client_id = await download_client_service.find_torrent_hash(
+                                release_title=release_title or download.release_title or "",
+                                timeout_seconds=8,
+                                poll_interval_seconds=1,
+                            )
+                        else:
+                            fallback_error = "qBittorrent URL add failed"
 
-                    if not download_url:
-                        download.status = DownloadStatus.FAILED
-                        download.status_message = "qBittorrent URL add failed: missing download URL"
-                        await db.commit()
-                        await _sync_wishlist_status(
-                            db,
-                            download,
-                            WishlistStatus.FAILED,
-                            message=download.status_message,
-                        )
-                        return {"status": "error", "message": download.status_message}
-
-                    grab_success = await download_client_service.add_torrent_url(download_url)
-                    logger.info(
-                        "Torrent direct URL add result download_id=%s guid=%s indexer_id=%s protocol=%s grab_path=%s success=%s",
-                        download_id,
-                        guid,
-                        indexer_id,
-                        protocol,
-                        grab_path,
-                        grab_success,
-                    )
-                    if grab_success:
-                        download_client_id = await download_client_service.find_torrent_hash(
-                            release_title=release_title or download.release_title or "",
-                        )
+                    grab_success = bool(grab_success)
 
             if grab_success:
                 if download_client_id:
                     download.status = DownloadStatus.DOWNLOADING
                     download.download_id = str(download_client_id)
-                    download.status_message = None
+                    download.status_message = status_message
                 else:
                     download.status = DownloadStatus.QUEUED
-                    download.status_message = "Queued; waiting for qBittorrent hash"
+                    download.status_message = f"{status_message}; waiting for qBittorrent hash"
 
                 # Record which download client handles this release
                 if protocol == "usenet":
@@ -591,11 +594,30 @@ async def _grab_release_async(
                     "client_id": download_client_id,
                 }
             else:
+                if protocol == "torrent" and prowlarr_accepted_without_hash and fallback_succeeded:
+                    download.status = DownloadStatus.QUEUED
+                    download.status_message = "Queued via direct URL; waiting for qBittorrent hash"
+                    download.download_client = "qbittorrent"
+                    download.started_at = datetime.utcnow()
+                    await db.commit()
+                    await _sync_wishlist_status(
+                        db,
+                        download,
+                        WishlistStatus.DOWNLOADING,
+                    )
+                    return {
+                        "status": "grabbed",
+                        "download_id": download_id,
+                        "client_id": None,
+                    }
+
                 download.status = DownloadStatus.FAILED
-                if protocol == "torrent" and guid and indexer_id and prowlarr_service.is_available:
+                if protocol == "torrent" and prowlarr_accepted_without_hash:
+                    download.status_message = "Prowlarr accepted but no torrent found; fallback failed"
+                elif protocol == "torrent" and used_prowlarr:
                     download.status_message = "Prowlarr grab failed"
                 elif protocol == "torrent":
-                    download.status_message = "qBittorrent URL add failed"
+                    download.status_message = fallback_error or "qBittorrent URL add failed"
                 else:
                     download.status_message = "Failed to add release to download client"
                 await db.commit()
