@@ -602,6 +602,7 @@ export interface GenreDiscoveryResponse {
   albums: any[]
   related_genres: string[]
   language_filter: DiscoveryLanguageFilter
+  strict: boolean
 }
 
 export interface MoodDiscoveryResponse {
@@ -656,8 +657,8 @@ export const discoveryApi = {
   getHome: () => api.get('/api/discovery/home'),
   getSimilar: (artistId: number, limit?: number) =>
     api.get(`/api/discovery/similar/${artistId}`, { params: { limit } }),
-  getGenre: (genre: string, sort?: string, broadenLanguage?: boolean) =>
-    api.get<GenreDiscoveryResponse>(`/api/discovery/genre/${genre}`, { params: { sort, broaden_language: broadenLanguage } }),
+  getGenre: (genre: string, sort?: string, broadenLanguage?: boolean, strict?: boolean) =>
+    api.get<GenreDiscoveryResponse>(`/api/discovery/genre/${genre}`, { params: { sort, broaden_language: broadenLanguage, strict } }),
   getDecade: (decade: number, genre?: string) =>
     api.get(`/api/discovery/decade/${decade}`, { params: { genre } }),
   getMood: (mood: string, broadenLanguage?: boolean) =>

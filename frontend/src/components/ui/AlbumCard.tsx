@@ -108,9 +108,9 @@ export function AlbumCard({ album, showArtist = true, size = 'md', onClick, onAd
         )}
 
         {/* Source badge for external items */}
-        {album.source && album.source !== 'local' && (
+        {album.source && (
           <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/60 backdrop-blur-sm rounded text-[10px] font-medium text-surface-300">
-            {album.source === 'lastfm' ? 'Last.fm' : album.source}
+            {album.source === 'lastfm' ? 'Last.fm' : album.source === 'local' ? 'Local' : album.source}
           </div>
         )}
       </div>
