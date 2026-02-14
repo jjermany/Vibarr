@@ -989,6 +989,22 @@ async def _import_completed_download_async(download_id: int):
                         download,
                         WishlistStatus.DOWNLOADED,
                     )
+                    # Trigger Plex to scan for newly imported files, then queue an
+                    # incremental Vibarr DB sync so the music appears in the library
+                    # without waiting for the next scheduled 6-hour sync.
+                    try:
+                        from app.services.plex import plex_service as _plex
+                        from app.tasks.sync import sync_plex_library as _sync_task
+                        await _plex.refresh_library()
+                        _sync_task.delay(False)
+                        logger.info(
+                            f"Triggered Plex refresh + incremental sync after import "
+                            f"of download {download_id}"
+                        )
+                    except Exception as _refresh_err:
+                        logger.warning(
+                            f"Post-import library refresh failed (non-fatal): {_refresh_err}"
+                        )
                 else:
                     download.status = DownloadStatus.FAILED
                     download.beets_imported = False

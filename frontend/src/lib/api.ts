@@ -675,6 +675,8 @@ export const libraryApi = {
   getSyncStatus: () => api.get('/api/library/sync/status'),
   getGenres: () => api.get('/api/library/genres'),
   getDecades: () => api.get('/api/library/decades'),
+  getTracks: (params?: { sort?: string; artist_id?: number; album_id?: number; limit?: number; offset?: number }) =>
+    api.get('/api/library/tracks', { params }),
 }
 
 export const artistsApi = {
@@ -738,6 +740,7 @@ export const downloadsApi = {
   deleteAll: (scope: 'all' | 'queue' | 'history' = 'all') =>
     api.delete('/api/downloads/bulk/delete', { data: { all: true, scope } }),
   retry: (id: number) => api.post<Download>(`/api/downloads/${id}/retry`),
+  importDownload: (id: number) => api.post<Download>(`/api/downloads/${id}/import`),
   pause: (id: number) => api.post(`/api/downloads/${id}/pause`),
   resume: (id: number) => api.post(`/api/downloads/${id}/resume`),
   search: (artist: string, album: string, format?: string) =>

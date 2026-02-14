@@ -85,10 +85,10 @@ celery_app.conf.update(
             "schedule": crontab(minute=15, hour="*/2"),
             "kwargs": {"days": 7},
         },
-        # Monitor active downloads every 5 minutes
+        # Monitor active downloads every minute for near-realtime progress updates
         "check-download-status": {
             "task": "app.tasks.downloads.check_download_status",
-            "schedule": crontab(minute="*/5"),
+            "schedule": crontab(minute="*/1"),
         },
         # Check playlist URL automation rules every 6 hours
         "check-playlist-urls": {

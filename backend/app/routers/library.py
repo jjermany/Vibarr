@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.artist import Artist
 from app.models.album import Album
+from app.models.track import Track
 
 router = APIRouter()
 
@@ -48,11 +49,16 @@ async def get_library_stats(
         select(func.count(Album.id)).where(Album.in_library == True)
     )
 
+    # Count tracks
+    track_count = await db.execute(
+        select(func.count(Track.id)).where(Track.in_library == True)
+    )
+
     # TODO: Implement full stats calculation
     return LibraryStats(
         total_artists=artist_count.scalar() or 0,
         total_albums=album_count.scalar() or 0,
-        total_tracks=0,
+        total_tracks=track_count.scalar() or 0,
         total_duration_hours=0.0,
         format_breakdown={},
         decade_breakdown={},
@@ -187,3 +193,60 @@ async def get_library_decades(
     """Get album counts by decade."""
     # TODO: Implement decade aggregation
     return {"decades": []}
+
+
+@router.get("/tracks")
+async def get_library_tracks(
+    sort: str = Query("recent", description="Sort: recent, name, artist, album"),
+    artist_id: Optional[int] = Query(None),
+    album_id: Optional[int] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get tracks in your library."""
+    query = (
+        select(Track)
+        .join(Track.album)
+        .where(Track.in_library == True)
+    )
+
+    if artist_id:
+        query = query.where(Album.artist_id == artist_id)
+    if album_id:
+        query = query.where(Track.album_id == album_id)
+
+    if sort == "name":
+        query = query.order_by(Track.title)
+    elif sort == "artist":
+        query = query.order_by(Album.artist_id, Track.album_id, Track.disc_number.nullslast(), Track.track_number.nullslast())
+    elif sort == "album":
+        query = query.order_by(Track.album_id, Track.disc_number.nullslast(), Track.track_number.nullslast())
+    else:  # recent
+        query = query.order_by(Track.created_at.desc())
+
+    query = query.limit(limit).offset(offset)
+    result = await db.execute(query)
+    tracks = result.scalars().all()
+
+    return {
+        "tracks": [
+            {
+                "id": t.id,
+                "title": t.title,
+                "track_number": t.track_number,
+                "disc_number": t.disc_number,
+                "duration_ms": t.duration_ms,
+                "album_id": t.album_id,
+                "album_title": t.album.title if t.album else None,
+                "artist_name": t.album.artist.name if t.album and t.album.artist else None,
+                "cover_url": t.album.cover_url if t.album else None,
+                "release_year": t.album.release_year if t.album else None,
+                "in_library": t.in_library,
+            }
+            for t in tracks
+        ],
+        "total": len(tracks),
+        "limit": limit,
+        "offset": offset,
+    }

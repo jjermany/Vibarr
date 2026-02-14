@@ -15,6 +15,7 @@ import {
   Clock,
   Activity,
   Trash2,
+  PackageCheck,
 } from 'lucide-react'
 import {
   downloadsApi,
@@ -88,6 +89,17 @@ export default function DownloadsPage() {
     },
     onError: (error: any) => {
       toast.error(error?.response?.data?.detail || 'Failed to retry download')
+    },
+  })
+
+  const importMutation = useMutation({
+    mutationFn: (id: number) => downloadsApi.importDownload(id),
+    onSuccess: async () => {
+      await refreshDownloadQueries()
+      toast.success('Import queued')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Failed to queue import')
     },
   })
 
@@ -303,7 +315,7 @@ export default function DownloadsPage() {
       )}
 
       {activeTab === 'history' && (
-        <HistoryTab downloads={history} isLoading={historyLoading} onRetry={(id) => retryMutation.mutate(id)} selectedIds={selectedIds} onToggleSelection={toggleSelection} />
+        <HistoryTab downloads={history} isLoading={historyLoading} onRetry={(id) => retryMutation.mutate(id)} onImport={(id) => importMutation.mutate(id)} selectedIds={selectedIds} onToggleSelection={toggleSelection} />
       )}
 
       {activeTab === 'search' && (
@@ -355,7 +367,7 @@ function QueueTab({ downloads, isLoading, onCancel, onRetry, selectedIds, onTogg
   )
 }
 
-function HistoryTab({ downloads, isLoading, onRetry, selectedIds, onToggleSelection }: { downloads: DownloadType[]; isLoading: boolean; onRetry: (id: number) => void; selectedIds: Set<number>; onToggleSelection: (id: number) => void }) {
+function HistoryTab({ downloads, isLoading, onRetry, onImport, selectedIds, onToggleSelection }: { downloads: DownloadType[]; isLoading: boolean; onRetry: (id: number) => void; onImport: (id: number) => void; selectedIds: Set<number>; onToggleSelection: (id: number) => void }) {
   if (isLoading) return <LoadingPage message="Loading history..." />
 
   if (downloads.length === 0) {
@@ -364,14 +376,29 @@ function HistoryTab({ downloads, isLoading, onRetry, selectedIds, onToggleSelect
 
   return (
     <div className="space-y-3">
-      {downloads.map((dl) => (
-        <DownloadCard key={dl.id} download={dl} onRetry={dl.status === 'failed' || dl.status === 'cancelled' ? () => onRetry(dl.id) : undefined} isSelected={selectedIds.has(dl.id)} onToggleSelection={() => onToggleSelection(dl.id)} />
-      ))}
+      {downloads.map((dl) => {
+        const canRetry = dl.status === 'failed' || dl.status === 'cancelled'
+        const canImport = dl.download_path && (
+          (dl.status === 'completed' && !dl.beets_imported) ||
+          dl.status === 'failed' ||
+          dl.status === 'importing'
+        )
+        return (
+          <DownloadCard
+            key={dl.id}
+            download={dl}
+            onRetry={canRetry ? () => onRetry(dl.id) : undefined}
+            onImport={canImport ? () => onImport(dl.id) : undefined}
+            isSelected={selectedIds.has(dl.id)}
+            onToggleSelection={() => onToggleSelection(dl.id)}
+          />
+        )
+      })}
     </div>
   )
 }
 
-function DownloadCard({ download, onCancel, onRetry, isSelected, onToggleSelection }: { download: DownloadType; onCancel?: () => void; onRetry?: () => void; isSelected: boolean; onToggleSelection: () => void }) {
+function DownloadCard({ download, onCancel, onRetry, onImport, isSelected, onToggleSelection }: { download: DownloadType; onCancel?: () => void; onRetry?: () => void; onImport?: () => void; isSelected: boolean; onToggleSelection: () => void }) {
   const isActive = ['downloading', 'searching', 'queued', 'importing'].includes(download.status)
   const statusSummary = [
     download.download_client ? `Client: ${download.download_client}` : null,
@@ -419,6 +446,12 @@ function DownloadCard({ download, onCancel, onRetry, isSelected, onToggleSelecti
           {onCancel && isActive && (
             <button onClick={onCancel} className="btn-ghost p-2 text-red-400 hover:text-red-300" title="Cancel">
               <XCircle className="w-4 h-4" />
+            </button>
+          )}
+
+          {onImport && (
+            <button onClick={onImport} className="btn-ghost p-2 text-emerald-400 hover:text-emerald-300" title="Import to library">
+              <PackageCheck className="w-4 h-4" />
             </button>
           )}
 

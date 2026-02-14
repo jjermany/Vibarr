@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Library as LibraryIcon, Grid, List, RefreshCw } from 'lucide-react'
+import { Library as LibraryIcon, Grid, List, RefreshCw, Music } from 'lucide-react'
 import { libraryApi, wishlistApi } from '@/lib/api'
 import type { SearchResult } from '@/lib/api'
 import { AlbumCard } from '@/components/ui/AlbumCard'
@@ -13,7 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
-type ViewMode = 'albums' | 'artists'
+type ViewMode = 'albums' | 'artists' | 'tracks'
 type SortOption = 'recent' | 'name' | 'date' | 'artist'
 
 export default function LibraryPage() {
@@ -39,10 +39,17 @@ export default function LibraryPage() {
     enabled: viewMode === 'artists',
   })
 
+  const { data: tracksData, isLoading: tracksLoading } = useQuery({
+    queryKey: ['library', 'tracks', sortBy],
+    queryFn: () => libraryApi.getTracks({ sort: sortBy === 'artist' ? 'artist' : sortBy, limit: 200 }),
+    enabled: viewMode === 'tracks',
+  })
+
   const stats = statsData?.data
   const albums = albumsData?.data?.albums || []
   const artists = artistsData?.data?.artists || []
-  const isLoading = viewMode === 'albums' ? albumsLoading : artistsLoading
+  const tracks = tracksData?.data?.tracks || []
+  const isLoading = viewMode === 'albums' ? albumsLoading : viewMode === 'artists' ? artistsLoading : tracksLoading
 
   const handlePreview = useCallback((item: any, type: string) => {
     const normalized: SearchResult = {
@@ -84,7 +91,7 @@ export default function LibraryPage() {
           <h1 className="text-2xl font-bold text-white">Your Library</h1>
           {stats && (
             <p className="text-surface-400 mt-1">
-              {stats.total_artists} artists &middot; {stats.total_albums} albums
+              {stats.total_artists} artists &middot; {stats.total_albums} albums &middot; {stats.total_tracks} tracks
             </p>
           )}
         </div>
@@ -118,6 +125,17 @@ export default function LibraryPage() {
             )}
           >
             Artists
+          </button>
+          <button
+            onClick={() => setViewMode('tracks')}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+              viewMode === 'tracks'
+                ? 'bg-primary-500/20 text-primary-400'
+                : 'text-surface-400 hover:text-white hover:bg-surface-800'
+            )}
+          >
+            Songs
           </button>
         </div>
 
@@ -159,6 +177,42 @@ export default function LibraryPage() {
       {/* Content */}
       {isLoading ? (
         <LoadingPage message="Loading library..." />
+      ) : viewMode === 'tracks' ? (
+        tracks.length > 0 ? (
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="border-b border-surface-800">
+                <tr className="text-left text-surface-400">
+                  <th className="py-3 px-4 w-10 font-medium">#</th>
+                  <th className="py-3 px-4 font-medium">Title</th>
+                  <th className="py-3 px-4 font-medium">Artist</th>
+                  <th className="py-3 px-4 font-medium hidden md:table-cell">Album</th>
+                  <th className="py-3 px-4 font-medium hidden sm:table-cell text-right">Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tracks.map((track: any, index: number) => (
+                  <tr key={track.id} className="border-b border-surface-800/50 hover:bg-surface-800/30 transition-colors">
+                    <td className="py-3 px-4 text-surface-500 w-10">{track.track_number ?? index + 1}</td>
+                    <td className="py-3 px-4 font-medium text-white truncate max-w-[200px]">{track.title}</td>
+                    <td className="py-3 px-4 text-surface-300 truncate max-w-[160px]">{track.artist_name || '—'}</td>
+                    <td className="py-3 px-4 text-surface-400 truncate max-w-[160px] hidden md:table-cell">{track.album_title || '—'}</td>
+                    <td className="py-3 px-4 text-surface-400 text-right hidden sm:table-cell">
+                      {track.duration_ms ? `${Math.floor(track.duration_ms / 60000)}:${String(Math.floor((track.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState
+            icon={<Music className="w-8 h-8" />}
+            title="No tracks in library"
+            description="Sync your Plex library to see your music tracks here"
+            action={<button className="btn-primary">Sync Library</button>}
+          />
+        )
       ) : viewMode === 'albums' ? (
         albums.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
