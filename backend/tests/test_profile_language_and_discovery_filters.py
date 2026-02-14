@@ -451,6 +451,7 @@ async def test_explore_genre_unresolved_id_uses_search_fallback_with_bounded_res
         genre="ambient",
         sort="popular",
         limit=5,
+        strict=False,
         broaden_language=False,
         current_user=type("U", (), {"preferred_language": None, "secondary_languages": []})(),
         db=_FakeDb(),
@@ -460,3 +461,70 @@ async def test_explore_genre_unresolved_id_uses_search_fallback_with_bounded_res
     assert deezer_artists
     assert any(artist["name"] == "Ambient Flow" for artist in deezer_artists)
     assert len(deezer_artists) <= 5
+
+
+@pytest.mark.asyncio
+async def test_explore_genre_strict_search_fallback_excludes_unrelated_pop_for_hip_hop(monkeypatch):
+    class _EmptyResult:
+        class _Scalars:
+            def all(self):
+                return []
+
+        def scalars(self):
+            return self._Scalars()
+
+    class _FakeDb:
+        async def execute(self, _query):
+            return _EmptyResult()
+
+    async def fake_get_genres():
+        return []
+
+    async def fake_search_artists(query, limit=50):
+        assert query == "hip hop"
+        assert limit >= 20
+        return [
+            {"id": 11, "name": "Pop Megastar", "nb_fan": 999999},
+            {"id": 22, "name": "Concrete Poet", "nb_fan": 9000},
+        ]
+
+    async def fake_get_artist_top_tracks(artist_id, limit=3):
+        assert limit == 3
+        if artist_id == 11:
+            return [
+                {
+                    "title": "Summer Lights",
+                    "album": {"title": "Golden Pop"},
+                    "artist": {"name": "Pop Megastar"},
+                }
+            ]
+        return [
+            {
+                "title": "Hip Hop Cipher",
+                "album": {"title": "Street Stories"},
+                "artist": {"name": "Concrete Poet"},
+            }
+        ]
+
+    async def fake_get_artist_albums(_artist_id, limit=3):
+        assert limit == 3
+        return []
+
+    monkeypatch.setattr(discovery.deezer_service, "get_genres", fake_get_genres)
+    monkeypatch.setattr(discovery.deezer_service, "search_artists", fake_search_artists)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_top_tracks", fake_get_artist_top_tracks)
+    monkeypatch.setattr(discovery.deezer_service, "get_artist_albums", fake_get_artist_albums)
+
+    payload = await discovery.explore_genre(
+        genre="hip-hop",
+        sort="popular",
+        limit=10,
+        broaden_language=False,
+        current_user=type("U", (), {"preferred_language": None, "secondary_languages": []})(),
+        db=_FakeDb(),
+    )
+
+    names = [artist["name"] for artist in payload["artists"] if artist.get("source") == "deezer"]
+    assert "Concrete Poet" in names
+    assert "Pop Megastar" not in names
+    assert payload["strict"] is True

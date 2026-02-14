@@ -92,9 +92,9 @@ export function ArtistCard({ artist, size = 'md', onClick, onAdd }: ArtistCardPr
         )}
 
         {/* Source badge for external items */}
-        {artist.source && artist.source !== 'local' && (
+        {artist.source && (
           <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-black/60 backdrop-blur-sm rounded-full text-[10px] font-medium text-surface-300">
-            {artist.source === 'lastfm' ? 'Last.fm' : artist.source}
+            {artist.source === 'lastfm' ? 'Last.fm' : artist.source === 'local' ? 'Local' : artist.source}
           </div>
         )}
       </div>

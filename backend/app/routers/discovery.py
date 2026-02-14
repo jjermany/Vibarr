@@ -35,6 +35,49 @@ def _contains_any_token(text: str, tokens: List[str]) -> bool:
     return any(token in haystack for token in tokens if len(token) > 2)
 
 
+def _phrase_matches_token_boundaries(text: str, phrase: str) -> bool:
+    """True when phrase tokens appear contiguously in text token stream."""
+    phrase_tokens = _tokenize(phrase)
+    text_tokens = _tokenize(text)
+    if not phrase_tokens or not text_tokens or len(phrase_tokens) > len(text_tokens):
+        return False
+    window = len(phrase_tokens)
+    return any(text_tokens[idx: idx + window] == phrase_tokens for idx in range(0, len(text_tokens) - window + 1))
+
+
+def _genre_terms(genre: str) -> List[str]:
+    g = (genre or '').strip().lower()
+    if not g:
+        return []
+    terms = [g, *(_GENRE_ALIASES.get(g, []))]
+    deduped: List[str] = []
+    for term in terms:
+        normalized = (term or '').strip().lower()
+        if normalized and normalized not in deduped:
+            deduped.append(normalized)
+    return deduped
+
+
+def _local_artist_genre_match(artist: Artist, genre: str) -> Dict[str, Any]:
+    """Evaluate local artist genre evidence with strict canonical/alias matching."""
+    canonical = (genre or '').strip().lower()
+    aliases = set(_GENRE_ALIASES.get(canonical, []))
+    artist_genres = [g.strip().lower() for g in (artist.genres or []) if isinstance(g, str) and g.strip()]
+    artist_tags = [t.strip().lower() for t in (artist.tags or []) if isinstance(t, str) and t.strip()]
+
+    if canonical in artist_genres:
+        return {"include": True, "source": "canonical_genre", "confidence": 1.0}
+
+    if any(g in aliases for g in artist_genres):
+        return {"include": True, "source": "genre_alias", "confidence": 0.95}
+
+    weak_tag_hit = any(t == canonical or t in aliases for t in artist_tags)
+    if weak_tag_hit:
+        return {"include": False, "source": "weak_tag_only", "confidence": 0.35}
+
+    return {"include": False, "source": "no_match", "confidence": 0.0}
+
+
 def _artist_name_relevance(name: str, genre: str) -> bool:
     """Require a strong name/token overlap for fallback genre artist search."""
     normalized_name = (name or "").strip().lower()
@@ -75,6 +118,23 @@ def _track_implies_genre_affinity(track: Dict[str, Any], genre: str) -> bool:
         return True
     matched = [token for token in genre_tokens if token in metadata_blob]
     return len(matched) >= min(2, len(genre_tokens))
+
+
+def _deezer_metadata_genre_evidence(track: Dict[str, Any], genre: str) -> bool:
+    """Require exact token boundary phrase matches for canonical genre or aliases."""
+    terms = _genre_terms(genre)
+    if not terms:
+        return False
+    candidates = [
+        track.get("title", ""),
+        track.get("title_short", ""),
+        (track.get("album") or {}).get("title", ""),
+        (track.get("artist") or {}).get("name", ""),
+    ]
+    for text in candidates:
+        if any(_phrase_matches_token_boundaries(text, term) for term in terms):
+            return True
+    return False
 
 
 # Maps common UI genre names to Deezer genre name variants.
@@ -673,11 +733,15 @@ async def explore_genre(
     genre: str,
     sort: str = Query("popular", description="Sort: popular, recent, random"),
     limit: int = Query(50, ge=1, le=200),
+    strict: bool = Query(True, description="Require strong genre match evidence for returned items"),
     broaden_language: bool = Query(False, description="Disable language filtering to broaden discovery"),
     current_user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Explore a specific genre with local + Deezer results."""
+    if not isinstance(strict, bool):
+        strict = True
+
     # Normalise genre slug: URL slugs may use hyphens instead of spaces
     genre = genre.strip().lower().replace("-", " ")
 
@@ -695,8 +759,11 @@ async def explore_genre(
 
     artists = []
     albums = []
+    local_artist_match_by_id: Dict[int, Dict[str, Any]] = {}
     for a in result.scalars().all():
-        if a.genres and genre.lower() in [g.lower() for g in a.genres]:
+        local_match = _local_artist_genre_match(a, genre)
+        if local_match["include"]:
+            local_artist_match_by_id[a.id] = local_match
             artists.append(
                 {
                     "id": a.id,
@@ -706,6 +773,8 @@ async def explore_genre(
                     "in_library": a.in_library,
                     "popularity": a.lastfm_listeners,
                     "source": "local",
+                    "genre_match_source": local_match["source"],
+                    "genre_match_confidence": local_match["confidence"],
                 }
             )
             if len(artists) >= limit:
@@ -720,6 +789,7 @@ async def explore_genre(
             .limit(limit)
         )
         for album in album_result.scalars().all():
+            artist_match = local_artist_match_by_id.get(album.artist_id, {"source": "artist_genre_context", "confidence": 0.8})
             albums.append(
                 {
                     "id": album.id,
@@ -729,6 +799,8 @@ async def explore_genre(
                     "release_year": album.release_year,
                     "in_library": album.in_library,
                     "source": "local",
+                    "genre_match_source": artist_match.get("source", "artist_genre_context"),
+                    "genre_match_confidence": artist_match.get("confidence", 0.8),
                 }
             )
 
@@ -750,7 +822,11 @@ async def explore_genre(
     seen_artist_ids: set = {str(a["id"]) for a in artists}
     seen_album_ids: set = {str(a["id"]) for a in albums}
 
-    def _add_deezer_artist(artist_data: Dict[str, Any]) -> bool:
+    def _add_deezer_artist(
+        artist_data: Dict[str, Any],
+        match_source: str,
+        match_confidence: float,
+    ) -> bool:
         """Add a Deezer artist if not already present. Returns True if added."""
         aid = artist_data.get("id")
         if not aid:
@@ -773,11 +849,18 @@ async def explore_genre(
                 "in_library": False,
                 "popularity": artist_data.get("nb_fan") or artist_data.get("fans"),
                 "source": "deezer",
+                "genre_match_source": match_source,
+                "genre_match_confidence": match_confidence,
             }
         )
         return True
 
-    def _add_deezer_album(album_data: Dict[str, Any], artist_name: str = "") -> bool:
+    def _add_deezer_album(
+        album_data: Dict[str, Any],
+        artist_name: str = "",
+        match_source: str = "artist_genre_context",
+        match_confidence: float = 0.75,
+    ) -> bool:
         """Add a Deezer album if not already present. Returns True if added."""
         aid = album_data.get("id")
         if not aid:
@@ -802,6 +885,8 @@ async def explore_genre(
                 "release_year": release_year,
                 "in_library": False,
                 "source": "deezer",
+                "genre_match_source": match_source,
+                "genre_match_confidence": match_confidence,
             }
         )
         return True
@@ -835,7 +920,7 @@ async def explore_genre(
                 else:
                     language_fallback_count += 1
 
-            _add_deezer_artist(artist)
+            _add_deezer_artist(artist, "deezer_genre_endpoint", 0.9)
             if len(artists) >= limit:
                 break
 
@@ -854,17 +939,20 @@ async def explore_genre(
                 continue
 
             strong_name_match = _artist_name_relevance(artist.get("name", ""), genre)
-            metadata_affinity = False
-            if not strong_name_match:
-                top_tracks = await deezer_service.get_artist_top_tracks(artist_id, limit=3)
-                metadata_affinity = any(
-                    _track_implies_genre_affinity(track, genre) for track in top_tracks
-                )
+            top_tracks = await deezer_service.get_artist_top_tracks(artist_id, limit=3)
+            strong_metadata_hit = any(
+                _deezer_metadata_genre_evidence(track, genre) for track in top_tracks
+            )
 
-            if not (strong_name_match or metadata_affinity):
+            if strict and not strong_metadata_hit:
                 continue
 
-            _add_deezer_artist(artist)
+            if not strong_metadata_hit and not strong_name_match:
+                continue
+
+            source = "top_track_or_album_metadata" if strong_metadata_hit else "artist_name_overlap"
+            confidence = 0.85 if strong_metadata_hit else 0.55
+            _add_deezer_artist(artist, source, confidence)
             if len(artists) >= limit:
                 break
 
@@ -884,7 +972,16 @@ async def explore_genre(
         for alb in artist_albums:
             if len(albums) >= limit:
                 break
-            _add_deezer_album(alb, artist_name)
+            artist_match = next(
+                (a for a in artists if a.get("id") == f"deezer:{da_id}"),
+                {},
+            )
+            _add_deezer_album(
+                alb,
+                artist_name,
+                match_source=artist_match.get("genre_match_source", "artist_genre_context"),
+                match_confidence=artist_match.get("genre_match_confidence", 0.75),
+            )
 
     all_genres = Counter()
     for a in artists:
@@ -904,6 +1001,7 @@ async def explore_genre(
             filtered_count=language_filtered_count,
             no_metadata_count=language_fallback_count,
         ),
+        "strict": strict,
     }
 
 
