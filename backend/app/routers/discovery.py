@@ -77,15 +77,19 @@ def _track_implies_genre_affinity(track: Dict[str, Any], genre: str) -> bool:
     return len(matched) >= min(2, len(genre_tokens))
 
 
-# Maps common UI genre names to Deezer genre name variants
+# Maps common UI genre names to Deezer genre name variants.
+# Only include true name variants for the same genre — do NOT include sub-genres
+# that Deezer exposes as separate genre IDs (e.g. "Dance", "House", "Indie").
+# Including those causes _preferred_genre_match to pick the wrong Deezer genre
+# when the sub-genre appears before the canonical one in the API response.
 _GENRE_ALIASES: Dict[str, List[str]] = {
     "hip hop": ["rap/hip hop", "rap", "hip-hop", "hip hop/rap"],
-    "r&b": ["r&b/soul", "soul", "r&b/soul/funk", "rhythm and blues"],
-    "electronic": ["electro", "dance", "house", "techno", "electronica", "electronic music"],
+    "r&b": ["r&b/soul", "r&b/soul/funk", "rhythm and blues"],
+    "electronic": ["electronica", "electronic music"],
     "classical": ["classical/opera", "opera", "orchestral"],
-    "alternative": ["alternative/indie", "indie", "alternative rock"],
+    "alternative": ["alternative/indie", "alternative rock"],
     "country": ["country/folk", "folk/country"],
-    "world": ["world music", "latin", "world/latin"],
+    "world": ["world music", "world/latin"],
     "metal": ["heavy metal", "hard rock/metal"],
 }
 
@@ -99,16 +103,21 @@ def _preferred_genre_match(value: str, genre: str) -> bool:
     # Check if the genre's token appears in the Deezer name (e.g. "hip hop" in "rap/hip hop")
     if g and g in v:
         return True
-    # Check alias mappings
+    # Check alias mappings: the Deezer genre name must exactly equal one of the known
+    # aliases for the requested UI genre.  Substring checks are intentionally omitted to
+    # prevent "electro" matching "electropop", "dance" matching "dance/pop", etc.
     aliases = _GENRE_ALIASES.get(g, [])
     for alias in aliases:
-        if v == alias or alias in v:
+        if v == alias:
             return True
-    # Reverse: check if any alias token appears in the query genre
+    # Reverse lookup: if the Deezer genre name matches the canonical genre in _GENRE_ALIASES
+    # and the requested UI genre IS that canonical, accept it.  This check is intentionally
+    # restricted to g == canonical so that two different aliases of the same canonical
+    # (e.g. "dance" and "house" both being aliases for "electronic") cannot cross-match
+    # each other through the shared parent.
     for canonical, alias_list in _GENRE_ALIASES.items():
-        if v == canonical or v in [a.lower() for a in alias_list]:
-            if g == canonical or g in [a.lower() for a in alias_list]:
-                return True
+        if g == canonical and (v == canonical or v in [a.lower() for a in alias_list]):
+            return True
     return False
 
 

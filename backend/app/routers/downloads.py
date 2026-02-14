@@ -431,6 +431,59 @@ async def retry_download(
     return download
 
 
+@router.post("/{download_id}/import", response_model=DownloadResponse)
+async def reimport_download(
+    download_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue a manual beets import for a download that completed without being imported,
+    is stuck in IMPORTING state, or failed during the import step."""
+    result = await db.execute(select(Download).where(Download.id == download_id))
+    download = result.scalar_one_or_none()
+
+    if not download:
+        raise HTTPException(status_code=404, detail="Download not found")
+
+    reimportable = (
+        download.status == DownloadStatus.COMPLETED and not download.beets_imported
+    ) or download.status in [DownloadStatus.FAILED, DownloadStatus.IMPORTING]
+
+    if not reimportable:
+        raise HTTPException(
+            status_code=400,
+            detail="Download is not in a re-importable state",
+        )
+
+    if not download.download_path:
+        raise HTTPException(
+            status_code=400,
+            detail="No download path recorded — cannot import without a source path",
+        )
+
+    download.status = DownloadStatus.IMPORTING
+    download.status_message = "Manual import queued"
+    download.beets_imported = False
+    await db.commit()
+
+    from app.tasks.downloads import import_completed_download as _import_task
+    _import_task.delay(download_id=download.id)
+
+    await db.refresh(download)
+    return download
+
+
+@router.post("/check")
+async def check_downloads_now():
+    """Immediately trigger a qBittorrent/SABnzbd status check for all active downloads.
+
+    Fires the Celery task asynchronously and returns at once — the frontend's
+    fast polling will pick up the updated statuses within a few seconds.
+    """
+    from app.tasks.downloads import check_download_status as _check_task
+    _check_task.delay()
+    return {"status": "triggered"}
+
+
 @router.post("/search", response_model=List[SearchResultResponse])
 async def search_releases(
     artist: str = Query(...),
