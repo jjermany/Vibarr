@@ -42,13 +42,13 @@ export default function DownloadsPage() {
   const { data: statsData } = useQuery({
     queryKey: ['download-stats'],
     queryFn: () => downloadsApi.stats(),
-    refetchInterval: 10000,
+    refetchInterval: 3000,
   })
 
   const { data: queueData, isLoading: queueLoading } = useQuery({
     queryKey: ['download-queue'],
     queryFn: () => downloadsApi.queue(),
-    refetchInterval: 5000,
+    refetchInterval: 2000,
     refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
     enabled: activeTab === 'queue',
@@ -57,7 +57,7 @@ export default function DownloadsPage() {
   const { data: historyData, isLoading: historyLoading } = useQuery({
     queryKey: ['download-history'],
     queryFn: () => downloadsApi.history(100),
-    refetchInterval: activeTab === 'history' ? 10000 : false,
+    refetchInterval: activeTab === 'history' ? 5000 : false,
     refetchOnWindowFocus: true,
     enabled: activeTab === 'history',
   })
@@ -100,6 +100,19 @@ export default function DownloadsPage() {
     },
     onError: (error: any) => {
       toast.error(error?.response?.data?.detail || 'Failed to queue import')
+    },
+  })
+
+  const checkNowMutation = useMutation({
+    mutationFn: () => downloadsApi.checkNow(),
+    onSuccess: async () => {
+      // Give the Celery task ~1.5s to run, then refresh the UI
+      await new Promise((r) => setTimeout(r, 1500))
+      await refreshDownloadQueries()
+    },
+    onError: () => {
+      // Silent — still refresh so the user sees the latest DB state
+      refreshDownloadQueries()
     },
   })
 
@@ -249,6 +262,15 @@ export default function DownloadsPage() {
             Manage your download queue and history
           </p>
         </div>
+        <button
+          onClick={() => checkNowMutation.mutate()}
+          disabled={checkNowMutation.isPending}
+          className="btn-secondary"
+          title="Force an immediate status check against the download client"
+        >
+          <RefreshCw className={`w-4 h-4 ${checkNowMutation.isPending ? 'animate-spin' : ''}`} />
+          {checkNowMutation.isPending ? 'Checking...' : 'Refresh'}
+        </button>
       </div>
 
       {stats && (

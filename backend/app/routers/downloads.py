@@ -472,6 +472,18 @@ async def reimport_download(
     return download
 
 
+@router.post("/check")
+async def check_downloads_now():
+    """Immediately trigger a qBittorrent/SABnzbd status check for all active downloads.
+
+    Fires the Celery task asynchronously and returns at once — the frontend's
+    fast polling will pick up the updated statuses within a few seconds.
+    """
+    from app.tasks.downloads import check_download_status as _check_task
+    _check_task.delay()
+    return {"status": "triggered"}
+
+
 @router.post("/search", response_model=List[SearchResultResponse])
 async def search_releases(
     artist: str = Query(...),

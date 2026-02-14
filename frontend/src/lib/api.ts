@@ -741,6 +741,7 @@ export const downloadsApi = {
     api.delete('/api/downloads/bulk/delete', { data: { all: true, scope } }),
   retry: (id: number) => api.post<Download>(`/api/downloads/${id}/retry`),
   importDownload: (id: number) => api.post<Download>(`/api/downloads/${id}/import`),
+  checkNow: () => api.post('/api/downloads/check'),
   pause: (id: number) => api.post(`/api/downloads/${id}/pause`),
   resume: (id: number) => api.post(`/api/downloads/${id}/resume`),
   search: (artist: string, album: string, format?: string) =>
