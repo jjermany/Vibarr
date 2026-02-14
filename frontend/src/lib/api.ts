@@ -258,6 +258,10 @@ export interface ReleaseSearchResult {
   score: number
 }
 
+export interface ManualImportRequest {
+  source_path: string
+}
+
 export interface GrabRequest {
   guid: string
   indexer_id: number
@@ -741,6 +745,8 @@ export const downloadsApi = {
     api.delete('/api/downloads/bulk/delete', { data: { all: true, scope } }),
   retry: (id: number) => api.post<Download>(`/api/downloads/${id}/retry`),
   importDownload: (id: number) => api.post<Download>(`/api/downloads/${id}/import`),
+  manualImportDownload: (id: number, data: ManualImportRequest) =>
+    api.post<Download>(`/api/downloads/${id}/import/manual`, data),
   checkNow: () => api.post('/api/downloads/check'),
   pause: (id: number) => api.post(`/api/downloads/${id}/pause`),
   resume: (id: number) => api.post(`/api/downloads/${id}/resume`),

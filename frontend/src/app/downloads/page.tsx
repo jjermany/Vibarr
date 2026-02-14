@@ -25,6 +25,7 @@ import {
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { LoadingPage } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { PathBrowserModal } from '@/components/ui/PathBrowserModal'
 import { cn, formatBytes } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { getVisibleSelectionState } from './selection'
@@ -37,6 +38,8 @@ export default function DownloadsPage() {
   const [searchAlbum, setSearchAlbum] = useState('')
   const [searchFormat, setSearchFormat] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [manualImportOpen, setManualImportOpen] = useState(false)
+  const [manualImportDownloadId, setManualImportDownloadId] = useState<number | null>(null)
   const queryClient = useQueryClient()
 
   const { data: statsData } = useQuery({
@@ -100,6 +103,20 @@ export default function DownloadsPage() {
     },
     onError: (error: any) => {
       toast.error(error?.response?.data?.detail || 'Failed to queue import')
+    },
+  })
+
+  const manualImportMutation = useMutation({
+    mutationFn: ({ id, sourcePath }: { id: number; sourcePath: string }) =>
+      downloadsApi.manualImportDownload(id, { source_path: sourcePath }),
+    onSuccess: async () => {
+      await refreshDownloadQueries()
+      toast.success('Manual import queued')
+      setManualImportOpen(false)
+      setManualImportDownloadId(null)
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.detail || 'Failed to queue manual import')
     },
   })
 
@@ -224,6 +241,17 @@ export default function DownloadsPage() {
   }, [activeTab, visibleDownloads])
 
   const selectionState = getVisibleSelectionState(visibleDownloads, selectedIds)
+  const selectedHistoryDownloads = history.filter((item) => selectedIds.has(item.id))
+
+  const openManualImport = () => {
+    if (selectedHistoryDownloads.length !== 1) {
+      toast.error('Select exactly one history download for manual import')
+      return
+    }
+
+    setManualImportDownloadId(selectedHistoryDownloads[0].id)
+    setManualImportOpen(true)
+  }
 
   const toggleSelectAllVisible = () => {
     setSelectedIds((current) => {
@@ -312,6 +340,17 @@ export default function DownloadsPage() {
             {selectionState.selectedVisibleCount} selected
           </span>
           <div className="ml-auto flex items-center gap-2">
+            {activeTab === 'history' && (
+              <button
+                onClick={openManualImport}
+                disabled={selectedHistoryDownloads.length !== 1 || manualImportMutation.isPending || deleteSelectedMutation.isPending || deleteAllMutation.isPending}
+                className="btn-secondary text-sm"
+                title="Select one history item to manually set an import path"
+              >
+                <PackageCheck className="w-4 h-4" />
+                Manual Import
+              </button>
+            )}
             <button
               onClick={() => deleteSelectedMutation.mutate(Array.from(selectedIds))}
               disabled={!selectionState.hasSelection || deleteSelectedMutation.isPending || deleteAllMutation.isPending}
@@ -357,6 +396,20 @@ export default function DownloadsPage() {
           results={searchResults}
         />
       )}
+
+      <PathBrowserModal
+        isOpen={manualImportOpen}
+        onClose={() => {
+          setManualImportOpen(false)
+          setManualImportDownloadId(null)
+        }}
+        title="Select Manual Import Source"
+        dirOnly
+        onSelect={(path) => {
+          if (manualImportDownloadId === null) return
+          manualImportMutation.mutate({ id: manualImportDownloadId, sourcePath: path })
+        }}
+      />
     </div>
   )
 }

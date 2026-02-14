@@ -1,5 +1,7 @@
 """Download queue and history endpoints."""
 
+import os
+
 from typing import Optional, List
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
@@ -120,6 +122,12 @@ class BulkDeleteResponse(BaseModel):
     deleted: int
     failed: int
     deleted_ids: List[int]
+
+
+class ManualImportRequest(BaseModel):
+    """Payload for manually importing a completed download from a source path."""
+
+    source_path: str
 
 
 # --- Endpoints ---
@@ -467,6 +475,43 @@ async def reimport_download(
 
     from app.tasks.downloads import import_completed_download as _import_task
     _import_task.delay(download_id=download.id)
+
+    await db.refresh(download)
+    return download
+
+
+@router.post("/{download_id}/import/manual", response_model=DownloadResponse)
+async def manual_import_download(
+    download_id: int,
+    request: ManualImportRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue a manual import for a download using a user-specified source folder."""
+    result = await db.execute(select(Download).where(Download.id == download_id))
+    download = result.scalar_one_or_none()
+
+    if not download:
+        raise HTTPException(status_code=404, detail="Download not found")
+
+    source_path = (request.source_path or "").strip()
+    if not source_path:
+        raise HTTPException(status_code=400, detail="source_path is required")
+
+    if not os.path.exists(source_path):
+        raise HTTPException(status_code=400, detail="source_path does not exist")
+
+    if not os.access(source_path, os.R_OK):
+        raise HTTPException(status_code=400, detail="source_path is not readable")
+
+    download.download_path = source_path
+    download.status = DownloadStatus.IMPORTING
+    download.status_message = "Manual import queued"
+    download.beets_imported = False
+    await db.commit()
+
+    from app.tasks.downloads import import_completed_download
+
+    import_completed_download.delay(download_id=download.id)
 
     await db.refresh(download)
     return download
