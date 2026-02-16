@@ -50,8 +50,13 @@ export default function DecadeExplorePage() {
   }, [])
 
   const handleAdd = useCallback(async (item: SearchResult) => {
+    const isAlbum = item.type === 'album'
+    const displayName = item.name || (isAlbum ? undefined : item.artist_name)
+    if (!displayName) {
+      toast.error('Cannot add an item with no name to wishlist')
+      return
+    }
     try {
-      const isAlbum = item.type === 'album'
       await wishlistApi.create({
         item_type: isAlbum ? 'album' : 'artist',
         artist_name: item.artist_name || (isAlbum ? undefined : item.name),
@@ -59,7 +64,7 @@ export default function DecadeExplorePage() {
         priority: 'normal',
         auto_download: false,
       })
-      toast.success(`Added "${item.name}" to wishlist`)
+      toast.success(`Added "${displayName}" to wishlist`)
       setPreviewItem(null)
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to add to wishlist')

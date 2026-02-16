@@ -1,6 +1,8 @@
 """Discovery endpoints for new music exploration."""
 
+import asyncio
 import logging
+import time
 from typing import Optional, List, Dict, Any
 from collections import Counter
 
@@ -22,6 +24,45 @@ from app.services.auth import get_current_user
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# In-memory TTL cache for Deezer API responses (process-scoped, 10-minute TTL)
+# ---------------------------------------------------------------------------
+_deezer_cache: dict[str, tuple[float, Any]] = {}
+_DEEZER_TTL = 600  # 10 minutes
+
+
+def _deezer_cache_get(key: str) -> Any | None:
+    entry = _deezer_cache.get(key)
+    if entry and time.monotonic() < entry[0]:
+        return entry[1]
+    _deezer_cache.pop(key, None)
+    return None
+
+
+def _deezer_cache_set(key: str, value: Any) -> None:
+    _deezer_cache[key] = (time.monotonic() + _DEEZER_TTL, value)
+
+
+async def _get_artist_top_tracks_cached(artist_id, limit: int) -> list:
+    key = f"top_tracks:{artist_id}:{limit}"
+    hit = _deezer_cache_get(key)
+    if hit is not None:
+        return hit
+    result = await deezer_service.get_artist_top_tracks(artist_id, limit=limit)
+    _deezer_cache_set(key, result)
+    return result
+
+
+async def _get_artist_albums_cached(artist_id, limit: int) -> list:
+    key = f"artist_albums:{artist_id}:{limit}"
+    hit = _deezer_cache_get(key)
+    if hit is not None:
+        return hit
+    result = await deezer_service.get_artist_albums(artist_id, limit=limit)
+    _deezer_cache_set(key, result)
+    return result
+
 
 router = APIRouter()
 
@@ -291,6 +332,16 @@ async def get_discovery_home(
     from datetime import datetime
 
     sections = []
+    # Global seen-set to prevent the same artist/album appearing in multiple sections.
+    # Keys are "artist:<id>", "album:<id>", or "spotify:<spotify_id>".
+    _seen_home_ids: set = set()
+
+    def _home_seen(key: str) -> bool:
+        """Return True if this content key was already added to a section."""
+        if key in _seen_home_ids:
+            return True
+        _seen_home_ids.add(key)
+        return False
 
     # 1. Release Radar - new releases from library artists
     release_recs = await db.execute(
@@ -325,6 +376,12 @@ async def get_discovery_home(
                 item["title"] = album.title
                 item["image_url"] = album.cover_url or item.get("image_url")
                 item["in_library"] = album.in_library
+        # Skip items that have no displayable name/title (dangling recommendation refs)
+        if not item.get("title") and not item.get("name") and not item.get("artist_name"):
+            continue
+        content_key = f"album:{rec.album_id}" if rec.album_id else f"artist:{rec.artist_id}"
+        if _home_seen(content_key):
+            continue
         release_section_items.append(item)
 
     # Spotify fallback: if no DB release radar items, use Spotify new releases
@@ -339,10 +396,17 @@ async def get_discovery_home(
             if library_artist_count > 0:
                 spotify_releases = await spotify_service.get_new_releases(limit=20)
                 for album in spotify_releases:
+                    sid = album.get("id", "")
+                    title = album.get("name", "")
+                    if not title or not sid:
+                        continue
+                    key = f"spotify:{sid}"
+                    if _home_seen(key):
+                        continue
                     release_section_items.append({
-                        "id": f"spotify:{album.get('id', '')}",
+                        "id": key,
                         "type": "album",
-                        "title": album.get("name", ""),
+                        "title": title,
                         "image_url": (album.get("images") or [{}])[0].get("url") if album.get("images") else None,
                         "artist_name": (album.get("artists") or [{}])[0].get("name") if album.get("artists") else None,
                         "reason": "New release from Spotify",
@@ -374,22 +438,26 @@ async def get_discovery_home(
     similar_items = similar_recs.scalars().all()
     similar_section_items = []
     for rec in similar_items:
-        item = {
+        if not rec.artist_id:
+            continue
+        artist = await db.execute(select(Artist).where(Artist.id == rec.artist_id))
+        artist = artist.scalar_one_or_none()
+        if not artist or not artist.name:
+            continue
+        content_key = f"artist:{rec.artist_id}"
+        if _home_seen(content_key):
+            continue
+        similar_section_items.append({
             "id": rec.id,
             "recommendation_id": rec.id,
             "type": "artist",
             "reason": rec.reason,
             "confidence": rec.confidence_score,
-        }
-        if rec.artist_id:
-            artist = await db.execute(select(Artist).where(Artist.id == rec.artist_id))
-            artist = artist.scalar_one_or_none()
-            if artist:
-                item["name"] = artist.name
-                item["image_url"] = artist.image_url
-                item["genres"] = artist.genres or []
-                item["in_library"] = artist.in_library
-        similar_section_items.append(item)
+            "name": artist.name,
+            "image_url": artist.image_url,
+            "genres": artist.genres or [],
+            "in_library": artist.in_library,
+        })
 
     # Spotify fallback: if no DB similar artist recs, use Spotify related artists
     if not similar_section_items and spotify_service.is_available:
@@ -401,23 +469,26 @@ async def get_discovery_home(
                 .limit(3)
             )
             library_artists = library_artists_result.scalars().all()
-            seen_ids = set()
             for lib_artist in library_artists:
                 related = await spotify_service.get_related_artists(lib_artist.spotify_id)
                 for a in related[:8]:
                     sid = a.get("id", "")
-                    if sid and sid not in seen_ids:
-                        seen_ids.add(sid)
-                        similar_section_items.append({
-                            "id": f"spotify:{sid}",
-                            "type": "artist",
-                            "name": a.get("name", ""),
-                            "image_url": (a.get("images") or [{}])[0].get("url") if a.get("images") else None,
-                            "genres": a.get("genres") or [],
-                            "reason": f"Related to {lib_artist.name}",
-                            "confidence": 0.75,
-                            "source": "spotify",
-                        })
+                    name = a.get("name", "")
+                    if not sid or not name:
+                        continue
+                    key = f"spotify:{sid}"
+                    if _home_seen(key):
+                        continue
+                    similar_section_items.append({
+                        "id": key,
+                        "type": "artist",
+                        "name": name,
+                        "image_url": (a.get("images") or [{}])[0].get("url") if a.get("images") else None,
+                        "genres": a.get("genres") or [],
+                        "reason": f"Related to {lib_artist.name}",
+                        "confidence": 0.75,
+                        "source": "spotify",
+                    })
                 if len(similar_section_items) >= 20:
                     break
         except Exception as e:
@@ -445,29 +516,37 @@ async def get_discovery_home(
     deep_items = deep_recs.scalars().all()
     deep_section_items = []
     for rec in deep_items:
-        item = {
+        item: dict = {
             "id": rec.id,
             "recommendation_id": rec.id,
             "type": "album",
             "reason": rec.reason,
             "confidence": rec.confidence_score,
         }
+        content_key: str | None = None
         if rec.album_id:
             album = await db.execute(select(Album).where(Album.id == rec.album_id))
             album = album.scalar_one_or_none()
-            if album:
+            if album and album.title:
                 item["title"] = album.title
                 item["image_url"] = album.cover_url
                 item["in_library"] = album.in_library
                 if album.artist:
                     item["artist_name"] = album.artist.name
+                content_key = f"album:{rec.album_id}"
         elif rec.artist_id:
             artist = await db.execute(select(Artist).where(Artist.id == rec.artist_id))
             artist = artist.scalar_one_or_none()
-            if artist:
+            if artist and artist.name:
                 item["artist_name"] = artist.name
                 item["image_url"] = artist.image_url
                 item["in_library"] = artist.in_library
+                content_key = f"artist:{rec.artist_id}"
+        # Skip items with no resolved display data or that already appeared in another section
+        if not content_key:
+            continue
+        if _home_seen(content_key):
+            continue
         deep_section_items.append(item)
 
     sections.append(
@@ -504,19 +583,24 @@ async def get_discovery_home(
             .limit(50)
         )
         for artist in genre_artists.scalars().all():
-            if artist.genres and top_genre in artist.genres:
-                genre_items.append(
-                    {
-                        "id": artist.id,
-                        "type": "artist",
-                        "name": artist.name,
-                        "image_url": artist.image_url,
-                        "genres": artist.genres or [],
-                        "in_library": artist.in_library,
-                    }
-                )
-                if len(genre_items) >= 10:
-                    break
+            if not (artist.genres and top_genre in artist.genres):
+                continue
+            if not artist.name:
+                continue
+            if _home_seen(f"artist:{artist.id}"):
+                continue
+            genre_items.append(
+                {
+                    "id": artist.id,
+                    "type": "artist",
+                    "name": artist.name,
+                    "image_url": artist.image_url,
+                    "genres": artist.genres or [],
+                    "in_library": artist.in_library,
+                }
+            )
+            if len(genre_items) >= 10:
+                break
 
     sections.append(
         {
@@ -540,20 +624,34 @@ async def get_discovery_home(
     discover_items = discover_recs.scalars().all()
     discover_section_items = []
     for rec in discover_items:
-        item = {
+        item: dict = {
             "id": rec.id,
             "recommendation_id": rec.id,
             "type": rec.recommendation_type,
             "reason": rec.reason,
             "confidence": rec.confidence_score,
         }
+        content_key: str | None = None
         if rec.artist_id:
             artist = await db.execute(select(Artist).where(Artist.id == rec.artist_id))
             artist = artist.scalar_one_or_none()
-            if artist:
+            if artist and artist.name:
                 item["name"] = artist.name
                 item["image_url"] = artist.image_url
                 item["in_library"] = artist.in_library
+                content_key = f"artist:{rec.artist_id}"
+        elif rec.album_id:
+            album = await db.execute(select(Album).where(Album.id == rec.album_id))
+            album = album.scalar_one_or_none()
+            if album and album.title:
+                item["name"] = album.title
+                item["image_url"] = album.cover_url
+                item["in_library"] = album.in_library
+                content_key = f"album:{rec.album_id}"
+        if not content_key:
+            continue
+        if _home_seen(content_key):
+            continue
         discover_section_items.append(item)
 
     # Spotify fallback: if no DB discover weekly items, use Spotify recommendations
@@ -577,10 +675,17 @@ async def get_discovery_home(
                     seed_genres=seed_genres[:5], limit=20
                 )
                 for track in recs:
+                    tid = track.get("id", "")
+                    name = track.get("name", "")
+                    if not tid or not name:
+                        continue
+                    key = f"spotify:{tid}"
+                    if _home_seen(key):
+                        continue
                     discover_section_items.append({
-                        "id": f"spotify:{track.get('id', '')}",
+                        "id": key,
                         "type": "track",
-                        "name": track.get("name", ""),
+                        "name": name,
                         "artist_name": (track.get("artists") or [{}])[0].get("name") if track.get("artists") else None,
                         "image_url": (
                             (track.get("album", {}).get("images") or [{}])[0].get("url")
@@ -895,20 +1000,23 @@ async def explore_genre(
         deezer_artists = await deezer_service.get_genre_artists(
             deezer_genre["id"], limit=max(40, min(limit * 2, 120))
         )
-        for artist in deezer_artists:
-            if not artist.get("id"):
-                continue
+        valid_deezer_artists = [a for a in deezer_artists if a.get("id")]
 
-            # Language filtering: check top tracks for language metadata
-            if preferred_languages and not broaden_language:
-                artist_top_tracks = await deezer_service.get_artist_top_tracks(
-                    artist["id"], limit=2
-                )
+        if preferred_languages and not broaden_language:
+            # Batch all top-track fetches in parallel, then apply language filter
+            track_lists = await asyncio.gather(
+                *[_get_artist_top_tracks_cached(a["id"], limit=2) for a in valid_deezer_artists],
+                return_exceptions=True,
+            )
+            for artist, artist_top_tracks in zip(valid_deezer_artists, track_lists):
+                if len(artists) >= limit:
+                    break
+                if isinstance(artist_top_tracks, Exception):
+                    artist_top_tracks = []
                 tracks_with_metadata = [
                     t for t in artist_top_tracks if _extract_language_metadata(t)
                 ]
                 if tracks_with_metadata:
-                    # We have metadata — filter if none match
                     has_language_match = any(
                         _language_match(_extract_language_metadata(t), preferred_languages)
                         for t in tracks_with_metadata
@@ -916,13 +1024,14 @@ async def explore_genre(
                     if not has_language_match:
                         language_filtered_count += 1
                         continue
-                # No metadata → keep artist as conservative fallback
                 else:
                     language_fallback_count += 1
-
-            _add_deezer_artist(artist, "deezer_genre_endpoint", 0.9)
-            if len(artists) >= limit:
-                break
+                _add_deezer_artist(artist, "deezer_genre_endpoint", 0.9)
+        else:
+            for artist in valid_deezer_artists:
+                if len(artists) >= limit:
+                    break
+                _add_deezer_artist(artist, "deezer_genre_endpoint", 0.9)
 
     # Supplement with Deezer artist search only when authoritative genre lookup is
     # unavailable.  The broaden_language flag controls language filtering only —
@@ -933,13 +1042,19 @@ async def explore_genre(
         search_artists = await deezer_service.search_artists(
             genre, limit=min(search_limit * 2, 50)
         )
-        for artist in search_artists:
-            artist_id = artist.get("id")
-            if not artist_id:
-                continue
+        valid_search_artists = [a for a in search_artists if a.get("id")]
+        # Batch all top-track fetches in parallel
+        search_track_lists = await asyncio.gather(
+            *[_get_artist_top_tracks_cached(a["id"], limit=3) for a in valid_search_artists],
+            return_exceptions=True,
+        )
+        for artist, top_tracks in zip(valid_search_artists, search_track_lists):
+            if len(artists) >= limit:
+                break
+            if isinstance(top_tracks, Exception):
+                top_tracks = []
 
             strong_name_match = _artist_name_relevance(artist.get("name", ""), genre)
-            top_tracks = await deezer_service.get_artist_top_tracks(artist_id, limit=3)
             strong_metadata_hit = any(
                 _deezer_metadata_genre_evidence(track, genre) for track in top_tracks
             )
@@ -953,8 +1068,6 @@ async def explore_genre(
             source = "top_track_or_album_metadata" if strong_metadata_hit else "artist_name_overlap"
             confidence = 0.85 if strong_metadata_hit else 0.55
             _add_deezer_artist(artist, source, confidence)
-            if len(artists) >= limit:
-                break
 
     # Fetch albums for Deezer artists that have few/no albums represented
     deezer_artist_ids = [
@@ -962,26 +1075,32 @@ async def explore_genre(
         for a in artists
         if str(a.get("id", "")).startswith("deezer:")
     ]
-    for da_id in deezer_artist_ids[:15]:
-        if len(albums) >= limit:
-            break
-        artist_albums = await deezer_service.get_artist_albums(da_id, limit=3)
-        artist_name = next(
-            (a["name"] for a in artists if a.get("id") == f"deezer:{da_id}"), ""
+    batch_ids = deezer_artist_ids[:15]
+    if batch_ids:
+        album_batches = await asyncio.gather(
+            *[_get_artist_albums_cached(da_id, limit=3) for da_id in batch_ids],
+            return_exceptions=True,
         )
-        for alb in artist_albums:
+        for da_id, artist_albums in zip(batch_ids, album_batches):
             if len(albums) >= limit:
                 break
+            if isinstance(artist_albums, Exception):
+                continue
+            artist_name = next(
+                (a["name"] for a in artists if a.get("id") == f"deezer:{da_id}"), ""
+            )
             artist_match = next(
-                (a for a in artists if a.get("id") == f"deezer:{da_id}"),
-                {},
+                (a for a in artists if a.get("id") == f"deezer:{da_id}"), {}
             )
-            _add_deezer_album(
-                alb,
-                artist_name,
-                match_source=artist_match.get("genre_match_source", "artist_genre_context"),
-                match_confidence=artist_match.get("genre_match_confidence", 0.75),
-            )
+            for alb in artist_albums:
+                if len(albums) >= limit:
+                    break
+                _add_deezer_album(
+                    alb,
+                    artist_name,
+                    match_source=artist_match.get("genre_match_source", "artist_genre_context"),
+                    match_confidence=artist_match.get("genre_match_confidence", 0.75),
+                )
 
     all_genres = Counter()
     for a in artists:

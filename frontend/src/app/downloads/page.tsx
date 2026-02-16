@@ -29,6 +29,7 @@ import { PathBrowserModal } from '@/components/ui/PathBrowserModal'
 import { cn, formatBytes } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { getVisibleSelectionState } from './selection'
+import { useDownloadWebSocket } from '@/lib/useDownloadWebSocket'
 
 type Tab = 'queue' | 'history' | 'search'
 
@@ -41,17 +42,19 @@ export default function DownloadsPage() {
   const [manualImportOpen, setManualImportOpen] = useState(false)
   const [manualImportDownloadId, setManualImportDownloadId] = useState<number | null>(null)
   const queryClient = useQueryClient()
+  const { isConnected: wsConnected } = useDownloadWebSocket()
 
   const { data: statsData } = useQuery({
     queryKey: ['download-stats'],
     queryFn: () => downloadsApi.stats(),
-    refetchInterval: 3000,
+    // Slow poll when WebSocket is active; fast poll as fallback
+    refetchInterval: wsConnected ? 30000 : 3000,
   })
 
   const { data: queueData, isLoading: queueLoading } = useQuery({
     queryKey: ['download-queue'],
     queryFn: () => downloadsApi.queue(),
-    refetchInterval: 2000,
+    refetchInterval: wsConnected ? 15000 : 2000,
     refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
     enabled: activeTab === 'queue',
@@ -60,7 +63,7 @@ export default function DownloadsPage() {
   const { data: historyData, isLoading: historyLoading } = useQuery({
     queryKey: ['download-history'],
     queryFn: () => downloadsApi.history(100),
-    refetchInterval: activeTab === 'history' ? 5000 : false,
+    refetchInterval: activeTab === 'history' ? (wsConnected ? 30000 : 5000) : false,
     refetchOnWindowFocus: true,
     enabled: activeTab === 'history',
   })
@@ -290,15 +293,23 @@ export default function DownloadsPage() {
             Manage your download queue and history
           </p>
         </div>
-        <button
-          onClick={() => checkNowMutation.mutate()}
-          disabled={checkNowMutation.isPending}
-          className="btn-secondary"
-          title="Force an immediate status check against the download client"
-        >
-          <RefreshCw className={`w-4 h-4 ${checkNowMutation.isPending ? 'animate-spin' : ''}`} />
-          {checkNowMutation.isPending ? 'Checking...' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-3">
+          {wsConnected && (
+            <span className="flex items-center gap-1.5 text-xs text-green-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block animate-pulse" />
+              Live
+            </span>
+          )}
+          <button
+            onClick={() => checkNowMutation.mutate()}
+            disabled={checkNowMutation.isPending}
+            className="btn-secondary"
+            title="Force an immediate status check against the download client"
+          >
+            <RefreshCw className={`w-4 h-4 ${checkNowMutation.isPending ? 'animate-spin' : ''}`} />
+            {checkNowMutation.isPending ? 'Checking...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {stats && (

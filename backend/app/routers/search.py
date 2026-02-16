@@ -1,15 +1,19 @@
 """Search endpoints for unified search across services."""
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
 from typing import Optional, List
 
 from fastapi import APIRouter, Query, Depends, HTTPException
 from pydantic import BaseModel, Field
+from redis import asyncio as aioredis
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings as _get_settings
 from app.database import get_db
 from app.models.artist import Artist
 from app.models.album import Album
@@ -23,8 +27,47 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ---------------------------------------------------------------------------
+# Redis search cache
+# ---------------------------------------------------------------------------
+_redis_client: aioredis.Redis | None = None
 
-async def _with_timeout(coro, seconds: float = 8.0):
+def _get_redis() -> aioredis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = aioredis.from_url(
+            _get_settings().redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+        )
+    return _redis_client
+
+_SEARCH_CACHE_TTL = 300  # 5 minutes
+
+
+def _search_cache_key(q: str, type_filter: str | None, limit: int) -> str:
+    raw = f"search:{type_filter or 'all'}:{q.lower().strip()}:{limit}"
+    return "search:" + hashlib.md5(raw.encode()).hexdigest()
+
+
+async def _get_cached_search(key: str):
+    try:
+        raw = await _get_redis().get(key)
+        if raw:
+            return raw
+    except Exception as exc:
+        logger.warning("Redis cache get failed: %s", exc)
+    return None
+
+
+async def _set_cached_search(key: str, data: str) -> None:
+    try:
+        await _get_redis().set(key, data, ex=_SEARCH_CACHE_TTL)
+    except Exception as exc:
+        logger.warning("Redis cache set failed: %s", exc)
+
+
+async def _with_timeout(coro, seconds: float = 4.0):
     """Run a coroutine with a timeout, returning empty list on timeout."""
     try:
         return await asyncio.wait_for(coro, timeout=seconds)
@@ -587,6 +630,13 @@ async def search(
     - YouTube Music (fallback)
         - Last.fm
     """
+    cache_key = _search_cache_key(q, type, limit)
+    cached_raw = await _get_cached_search(cache_key)
+    if cached_raw:
+        logger.debug("Search cache hit | q=%r | type=%s | limit=%d", q, type, limit)
+        from fastapi.responses import Response
+        return Response(content=cached_raw, media_type="application/json")
+
     artists: List[SearchResultItem] = []
     albums: List[SearchResultItem] = []
     tracks: List[SearchResultItem] = []
@@ -677,13 +727,15 @@ async def search(
 
     total = len(artists) + len(albums) + len(tracks)
 
-    return SearchResponse(
+    response = SearchResponse(
         query=q,
         total=total,
         artists=artists,
         albums=albums,
         tracks=tracks,
     )
+    await _set_cached_search(cache_key, response.model_dump_json())
+    return response
 
 
 @router.get("/preview", response_model=PreviewResponse)

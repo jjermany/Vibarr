@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,25 @@ class WishlistItemCreate(BaseModel):
     preferred_format: Optional[str] = None
     auto_download: bool = False
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def require_identifiable_name(self) -> "WishlistItemCreate":
+        """Ensure the item has at least one non-empty display name so blank entries
+        cannot reach the database."""
+        artist_name = (self.artist_name or "").strip()
+        album_title = (self.album_title or "").strip()
+        has_name = bool(artist_name or album_title or self.artist_id or self.album_id)
+        if not has_name:
+            raise ValueError(
+                "A wishlist item must have an artist name, album title, "
+                "or a valid artist_id / album_id."
+            )
+        # Strip whitespace from text fields in-place
+        if self.artist_name is not None:
+            self.artist_name = artist_name or None
+        if self.album_title is not None:
+            self.album_title = album_title or None
+        return self
 
 
 class WishlistItemResponse(BaseModel):
