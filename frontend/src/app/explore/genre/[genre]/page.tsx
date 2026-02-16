@@ -20,19 +20,17 @@ export default function GenreExplorePage() {
   const params = useParams()
   const genre = decodeURIComponent(params.genre as string)
   const [previewItem, setPreviewItem] = useState<SearchResult | null>(null)
-  const [hideLowConfidence, setHideLowConfidence] = useState(true)
   const { apiUsable } = useBackendReadiness()
 
   const { data, isLoading } = useQuery({
     queryKey: ['discovery', 'genre', genre],
-    queryFn: () => discoveryApi.getGenre(genre, undefined, true, true),
+    queryFn: () => discoveryApi.getGenre(genre),
     enabled: !!genre && apiUsable,
   })
 
   const result = data?.data
-  const confidenceThreshold = 0.75
-  const artists = (result?.artists || []).filter((item: any) => !hideLowConfidence || (item.genre_match_confidence ?? 0) >= confidenceThreshold)
-  const albums = (result?.albums || []).filter((item: any) => !hideLowConfidence || (item.genre_match_confidence ?? 0) >= confidenceThreshold)
+  const artists = result?.artists || []
+  const albums = result?.albums || []
   const relatedGenres = result?.related_genres || []
 
   const handlePreview = useCallback((item: any, type: string) => {
@@ -91,17 +89,6 @@ export default function GenreExplorePage() {
           Source labels identify local library matches vs Deezer fallback results.
         </div>
       </div>
-
-      <label className="inline-flex items-center gap-2 text-sm text-surface-300">
-        <input
-          type="checkbox"
-          checked={hideLowConfidence}
-          onChange={(event) => setHideLowConfidence(event.target.checked)}
-          className="rounded border-surface-600 bg-surface-900"
-        />
-        Hide low-confidence matches
-      </label>
-
 
       {!apiUsable || isLoading ? (
         <div className="flex items-center justify-center py-16">
