@@ -64,6 +64,51 @@ async def _get_artist_albums_cached(artist_id, limit: int) -> list:
     return result
 
 
+async def _get_deezer_genres_cached() -> list:
+    """Cache Deezer's genre list — it never changes so a long TTL is fine."""
+    key = "deezer:genres"
+    hit = _deezer_cache_get(key)
+    if hit is not None:
+        return hit
+    result = await deezer_service.get_genres()
+    if result:  # only cache a successful (non-empty) response
+        _deezer_cache_set(key, result)
+    return result
+
+
+async def _get_deezer_genre_artists_cached(genre_id, limit: int) -> list:
+    key = f"deezer:genre_artists:{genre_id}:{limit}"
+    hit = _deezer_cache_get(key)
+    if hit is not None:
+        return hit
+    result = await deezer_service.get_genre_artists(genre_id, limit=limit)
+    if result:  # only cache non-empty results
+        _deezer_cache_set(key, result)
+    return result
+
+
+async def _get_lastfm_tag_artists_cached(tag: str, limit: int) -> list:
+    key = f"lastfm:tag_artists:{tag.lower()}:{limit}"
+    hit = _deezer_cache_get(key)
+    if hit is not None:
+        return hit
+    result = await lastfm_service.get_top_artists_by_tag(tag, limit=limit)
+    if result:
+        _deezer_cache_set(key, result)
+    return result
+
+
+async def _get_lastfm_tag_albums_cached(tag: str, limit: int) -> list:
+    key = f"lastfm:tag_albums:{tag.lower()}:{limit}"
+    hit = _deezer_cache_get(key)
+    if hit is not None:
+        return hit
+    result = await lastfm_service.get_top_albums_by_tag(tag, limit=limit)
+    if result:
+        _deezer_cache_set(key, result)
+    return result
+
+
 router = APIRouter()
 
 
@@ -865,17 +910,17 @@ async def explore_genre(
     artists = []
     albums = []
     local_artist_match_by_id: Dict[int, Dict[str, Any]] = {}
-    # Build a name → genre-match map over ALL returned DB rows (up to 200).
-    # This is used below to cross-check Deezer results: if we know from our own DB
-    # that an artist's primary genres don't include this genre (e.g. Taylor Swift
-    # is tagged primarily as pop/country), we reject that artist from the Deezer
-    # results even if Deezer's genre endpoint incorrectly lists them there.
-    local_name_genre_map: Dict[str, bool] = {}  # normalised name → True if genre matches
+    # Build name maps over ALL returned DB rows (up to 200).
+    # local_name_genre_map: used to cross-check external (Deezer/Last.fm) results.
+    # local_name_image_map: used to enrich Last.fm artist results with local images.
+    local_name_genre_map: Dict[str, bool] = {}   # normalised name → True if genre matches
+    local_name_image_map: Dict[str, Any] = {}    # normalised name → image_url
     for a in result.scalars().all():
         local_match = _local_artist_genre_match(a, genre)
         normalized_name = (a.name or "").strip().lower()
         if normalized_name:
             local_name_genre_map[normalized_name] = local_match["include"]
+            local_name_image_map[normalized_name] = a.image_url or a.thumb_url
         if local_match["include"] and len(artists) < limit:
             local_artist_match_by_id[a.id] = local_match
             artists.append(
@@ -920,8 +965,16 @@ async def explore_genre(
     language_filtered_count = 0
     language_fallback_count = 0
 
-    # ---- Deezer: try the authoritative genre-artists endpoint first ----
-    deezer_genres = await deezer_service.get_genres()
+    # Fetch Last.fm tag data and Deezer genre list concurrently.
+    # Last.fm tags are community-curated from millions of scrobbles and are far more
+    # genre-specific than Deezer's genre/artists endpoint, which returns globally famous
+    # crossover artists (the same megastars appear under pop, hip-hop, rock, etc.).
+    deezer_genres, lastfm_tag_artists, lastfm_tag_albums = await asyncio.gather(
+        _get_deezer_genres_cached(),
+        _get_lastfm_tag_artists_cached(genre, 40),
+        _get_lastfm_tag_albums_cached(genre, 40),
+    )
+
     deezer_genre = next(
         (g for g in deezer_genres if _preferred_genre_match(g.get("name", ""), genre)),
         None,
@@ -933,6 +986,9 @@ async def explore_genre(
 
     seen_artist_ids: set = {str(a["id"]) for a in artists}
     seen_album_ids: set = {str(a["id"]) for a in albums}
+    # Name-based dedup prevents the same artist appearing from multiple sources
+    # (local DB, Last.fm, Deezer) under different IDs.
+    seen_artist_names: set = {(a.get("name", "") or "").strip().lower() for a in artists}
 
     def _add_deezer_artist(
         artist_data: Dict[str, Any],
@@ -946,13 +1002,18 @@ async def explore_genre(
         key = f"deezer:{aid}"
         if key in seen_artist_ids:
             return False
+        name_key = (artist_data.get("name", "") or "").strip().lower()
+        # Name dedup: skip if the same artist was already added from Last.fm or local DB
+        if name_key and name_key in seen_artist_names:
+            return False
         # Cross-check against local DB knowledge: if we have this artist in our
         # library and their primary genres don't include the requested genre,
         # reject them even if Deezer's endpoint incorrectly lists them here.
-        name_key = (artist_data.get("name", "") or "").strip().lower()
         if name_key and name_key in local_name_genre_map and not local_name_genre_map[name_key]:
             return False
         seen_artist_ids.add(key)
+        if name_key:
+            seen_artist_names.add(name_key)
         artists.append(
             {
                 "id": key,
