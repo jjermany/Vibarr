@@ -100,18 +100,29 @@ def _genre_terms(genre: str) -> List[str]:
 
 
 def _local_artist_genre_match(artist: Artist, genre: str) -> Dict[str, Any]:
-    """Evaluate local artist genre evidence with strict canonical/alias matching."""
+    """Evaluate local artist genre evidence using only primary genres.
+
+    Only the first 3 genres in the artist's genres list are considered for inclusion.
+    Genres beyond position 2 are typically secondary/associated tags that were added by
+    crowd-sourced sources (Last.fm, etc.) and are unreliable — e.g. a pop artist may have
+    "hip hop" at position 5 due to a single collaboration, which should not cause them to
+    appear on the hip-hop explore page.
+    """
     canonical = (genre or '').strip().lower()
     aliases = set(_GENRE_ALIASES.get(canonical, []))
     artist_genres = [g.strip().lower() for g in (artist.genres or []) if isinstance(g, str) and g.strip()]
     artist_tags = [t.strip().lower() for t in (artist.tags or []) if isinstance(t, str) and t.strip()]
 
-    if canonical in artist_genres:
+    # Only check primary genres (first 3 in the stored list) for inclusion decisions.
+    primary_genres = artist_genres[:3]
+
+    if canonical in primary_genres:
         return {"include": True, "source": "canonical_genre", "confidence": 1.0}
 
-    if any(g in aliases for g in artist_genres):
+    if any(g in aliases for g in primary_genres):
         return {"include": True, "source": "genre_alias", "confidence": 0.95}
 
+    # Tags are crowd-sourced and noisy — use as a weak signal only, never include
     weak_tag_hit = any(t == canonical or t in aliases for t in artist_tags)
     if weak_tag_hit:
         return {"include": False, "source": "weak_tag_only", "confidence": 0.35}
@@ -196,28 +207,21 @@ _GENRE_ALIASES: Dict[str, List[str]] = {
 
 
 def _preferred_genre_match(value: str, genre: str) -> bool:
-    """Match a Deezer genre name against a UI genre name, including known aliases."""
+    """Match a Deezer genre name against a UI genre name using exact or alias matching only.
+
+    Substring matching is intentionally excluded — e.g. "pop" must NOT match "dance/pop",
+    "j-pop", "electropop", etc. because that causes the wrong Deezer genre ID to be selected,
+    returning artists from a completely different sub-genre.  The _GENRE_ALIASES dict covers
+    all legitimate name variants (e.g. "hip hop" → "rap/hip hop").
+    """
     v = (value or "").strip().lower()
     g = (genre or "").strip().lower()
+    # Exact match
     if v == g:
         return True
-    # Check if the genre's token appears in the Deezer name (e.g. "hip hop" in "rap/hip hop")
-    if g and g in v:
-        return True
-    # Check alias mappings: the Deezer genre name must exactly equal one of the known
-    # aliases for the requested UI genre.  Substring checks are intentionally omitted to
-    # prevent "electro" matching "electropop", "dance" matching "dance/pop", etc.
-    aliases = _GENRE_ALIASES.get(g, [])
-    for alias in aliases:
-        if v == alias:
-            return True
-    # Reverse lookup: if the Deezer genre name matches the canonical genre in _GENRE_ALIASES
-    # and the requested UI genre IS that canonical, accept it.  This check is intentionally
-    # restricted to g == canonical so that two different aliases of the same canonical
-    # (e.g. "dance" and "house" both being aliases for "electronic") cannot cross-match
-    # each other through the shared parent.
-    for canonical, alias_list in _GENRE_ALIASES.items():
-        if g == canonical and (v == canonical or v in [a.lower() for a in alias_list]):
+    # Alias match: Deezer's name must exactly equal a known alias for this UI genre
+    for alias in _GENRE_ALIASES.get(g, []):
+        if v == alias.lower():
             return True
     return False
 
