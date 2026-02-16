@@ -842,15 +842,11 @@ async def explore_genre(
     genre: str,
     sort: str = Query("popular", description="Sort: popular, recent, random"),
     limit: int = Query(50, ge=1, le=200),
-    strict: bool = Query(True, description="Require strong genre match evidence for returned items"),
     broaden_language: bool = Query(False, description="Disable language filtering to broaden discovery"),
     current_user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Explore a specific genre with local + Deezer results."""
-    if not isinstance(strict, bool):
-        strict = True
-
     # Normalise genre slug: URL slugs may use hyphens instead of spaces
     genre = genre.strip().lower().replace("-", " ")
 
@@ -869,9 +865,18 @@ async def explore_genre(
     artists = []
     albums = []
     local_artist_match_by_id: Dict[int, Dict[str, Any]] = {}
+    # Build a name → genre-match map over ALL returned DB rows (up to 200).
+    # This is used below to cross-check Deezer results: if we know from our own DB
+    # that an artist's primary genres don't include this genre (e.g. Taylor Swift
+    # is tagged primarily as pop/country), we reject that artist from the Deezer
+    # results even if Deezer's genre endpoint incorrectly lists them there.
+    local_name_genre_map: Dict[str, bool] = {}  # normalised name → True if genre matches
     for a in result.scalars().all():
         local_match = _local_artist_genre_match(a, genre)
-        if local_match["include"]:
+        normalized_name = (a.name or "").strip().lower()
+        if normalized_name:
+            local_name_genre_map[normalized_name] = local_match["include"]
+        if local_match["include"] and len(artists) < limit:
             local_artist_match_by_id[a.id] = local_match
             artists.append(
                 {
@@ -886,8 +891,6 @@ async def explore_genre(
                     "genre_match_confidence": local_match["confidence"],
                 }
             )
-            if len(artists) >= limit:
-                break
 
     artist_ids = [a["id"] for a in artists[:20]]
     if artist_ids:
@@ -942,6 +945,12 @@ async def explore_genre(
             return False
         key = f"deezer:{aid}"
         if key in seen_artist_ids:
+            return False
+        # Cross-check against local DB knowledge: if we have this artist in our
+        # library and their primary genres don't include the requested genre,
+        # reject them even if Deezer's endpoint incorrectly lists them here.
+        name_key = (artist_data.get("name", "") or "").strip().lower()
+        if name_key and name_key in local_name_genre_map and not local_name_genre_map[name_key]:
             return False
         seen_artist_ids.add(key)
         artists.append(
@@ -1058,20 +1067,16 @@ async def explore_genre(
             if isinstance(top_tracks, Exception):
                 top_tracks = []
 
-            strong_name_match = _artist_name_relevance(artist.get("name", ""), genre)
             strong_metadata_hit = any(
                 _deezer_metadata_genre_evidence(track, genre) for track in top_tracks
             )
 
-            if strict and not strong_metadata_hit:
+            # Always require hard metadata evidence when falling back to text search —
+            # name-overlap alone is too weak and produces false positives.
+            if not strong_metadata_hit:
                 continue
 
-            if not strong_metadata_hit and not strong_name_match:
-                continue
-
-            source = "top_track_or_album_metadata" if strong_metadata_hit else "artist_name_overlap"
-            confidence = 0.85 if strong_metadata_hit else 0.55
-            _add_deezer_artist(artist, source, confidence)
+            _add_deezer_artist(artist, "top_track_or_album_metadata", 0.85)
 
     # Fetch albums for Deezer artists that have few/no albums represented
     deezer_artist_ids = [
@@ -1124,7 +1129,6 @@ async def explore_genre(
             filtered_count=language_filtered_count,
             no_metadata_count=language_fallback_count,
         ),
-        "strict": strict,
     }
 
 
